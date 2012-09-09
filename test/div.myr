@@ -1,0 +1,8 @@
+const main = {
+	var a
+	var b
+
+	a = 84
+	b = 2
+	-> a / b
+}

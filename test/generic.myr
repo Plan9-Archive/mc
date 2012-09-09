@@ -1,0 +1,9 @@
+generic id = {a:@a
+	-> a
+}
+
+const main = {
+	id("adsf")
+	-> id(42)
+}
+
