@@ -89,7 +89,7 @@ int main(int argc, char **argv)
     int opt;
     int i;
 
-    lappend(&incpaths, &nincpaths, Instroot "lib/myr");
+    lappend(&incpaths, &nincpaths, Instroot "/lib/myr");
     while ((opt = getopt(argc, argv, "d::hmo:I:")) != -1) {
         switch (opt) {
             case 'h':
@@ -107,9 +107,9 @@ int main(int argc, char **argv)
                 while (optarg && *optarg)
                     debugopt[*optarg++ & 0x7f] = 1;
                 break;
-	    case 'I':
-		lappend(&incpaths, &nincpaths, optarg);
-		break;
+            case 'I':
+                lappend(&incpaths, &nincpaths, optarg);
+                break;
             default:
                 usage(argv[0]);
                 exit(0);
