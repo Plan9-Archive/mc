@@ -1111,21 +1111,20 @@ static void rewrite(Isel *s)
  */
 static void delnops(Isel *s)
 {
-    size_t i, j;
-    Asmbb *bb;
     Insn *insn;
+    Asmbb *bb;
     Insn **new;
     size_t nnew;
+    size_t i, j;
 
     for (i = 0; i < s->nbb; i++) {
-        bb = s->bb[i];
         new = NULL;
         nnew = 0;
+        bb = s->bb[i];
         for (j = 0; j < bb->ni; j++) {
             insn = bb->il[j];
-            if (ismove(insn))
-                if (insn->args[0]->reg.colour == insn->args[1]->reg.colour)
-                    continue;
+            if (ismove(insn) && insn->args[0]->reg.colour == insn->args[1]->reg.colour)
+              continue;
             lappend(&new, &nnew, insn);
         }
         lfree(&bb->il, &bb->ni);
