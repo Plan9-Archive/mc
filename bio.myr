@@ -32,6 +32,8 @@ pkg bio =
 	const read	: (f : file#, dst : byte[:]	-> std.option(byte[:]))
 	const flush	: (f : file# -> bool)
 
+	/* seeking */
+
 	/* single unit operations */
 	const putb	: (f : file#, b : byte	-> std.size)
 	const putc	: (f : file#, c : char	-> std.size)
@@ -359,13 +361,26 @@ const peekc = {f
   	bio.readto(f, ',')	-> "bar\n"
 */
 const readto = {f, delim
-	var ret : byte[:]
+	-> readdelim(f, delim, false)
+}
+
+const skipto = {f, delim
+	match readdelim(f, delim, true)
+	| `std.Some ret:	-> true
+	| `std.None:	-> false
+	;;
+}
+
+const readdelim = {f, delim, drop
+	var ret
 	var i, j
 
 	ret = [][:]
 	while true
 		if !ensureread(f, delim.len)
-			ret = readinto(f, ret, f.rend - f.rstart)
+			if !drop
+				ret = readinto(f, ret, f.rend - f.rstart)
+			;;
 			if ret.len > 0
 				-> `std.Some ret
 			else
@@ -379,13 +394,17 @@ const readto = {f, delim
 						goto nextiterread
 					;;
 				;;
-				ret = readinto(f, ret, i - f.rstart)
+				if !drop
+					ret = readinto(f, ret, i - f.rstart)
+				;;
 				f.rstart += delim.len
 				-> `std.Some ret
 			;;
 :nextiterread
 		;;
-		ret = readinto(f, ret, i - f.rstart)
+		if !drop
+			ret = readinto(f, ret, f.rend - f.rstart)
+		;;
 	;;
 	std.die("unreachable")
 }
@@ -468,7 +487,7 @@ const ensureread = {f, n
 	held = f.rend - f.rstart
 	if n > held
 		/* if we need to shift the slice down to the start, do it */
-		cap = f.rbuf.len - f.rend
+		cap = f.rend - f.rstart
 		if n > (cap + held)
 			std.slcp(f.rbuf[:cap], f.rbuf[f.rstart:f.rend])
 			f.rstart = 0
