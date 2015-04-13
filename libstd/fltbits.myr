@@ -1,0 +1,60 @@
+pkg std =
+	const flt64bits	: (flt : flt64 -> int64)
+	const flt32bits	: (flt : flt32 -> int32)
+	const flt64frombits	: (bits : uint64 -> flt64)
+	const flt32frombits	: (bits : uint32 -> flt32)
+	const flt64explode	: (flt : flt64 -> (bool, int64, int64))
+	const flt32explode	: (flt : flt32 -> (bool, int32, int32))
+;;
+
+const flt64bits	= {flt;	-> (&flt castto(int64#))#}
+const flt32bits	= {flt;	-> (&flt castto(int32#))#}
+const flt64frombits	= {bits;	-> (&bits castto(flt64#))#}
+const flt32frombits	= {bits;	-> (&bits castto(flt32#))#}
+
+const flt64explode = {flt
+	var bits, isneg, mant, exp
+
+	bits = flt64bits(flt)
+	isneg = (bits >> 63) != 0  	/* msb is sign bit */
+	exp = (bits >> 52) & 0x7ff 	/* exp is in bits [52..63] */
+	mant = bits & ((1l << 52) - 1) /* msb is in bits [..51] */
+
+	/* add back the implicit bit if this is not a denormal */
+	if exp != 0
+		mant |= 1l << 52
+	else
+		exp = 1
+	;;
+	/*
+	   adjust for exponent bias. nb: because we are
+	   treating the mantissa as m.0 instead of 0.m,
+	   our exponent bias needs to be offset by the
+	   size of m
+	*/
+	-> (isneg, mant, exp)
+}
+
+const flt32explode = {flt
+	var bits, isneg, mant, exp
+
+	bits = flt32bits(flt)
+	isneg = (bits >> 31) != 0  	/* msb is sign bit */
+	exp = (bits >> 22) & 0xff 	/* exp is in bits [23..30] */
+	mant = bits & ((1 << 22) - 1) /* msb is in bits [0..22] */
+
+	/* add back the implicit bit if this is not a denormal */
+	if exp != 0
+		mant |= 1 << 22
+	else
+		exp = 1
+	;;
+	/*
+	   adjust for exponent bias. nb: because we are
+	   treating the mantissa as m.0 instead of 0.m,
+	   our exponent bias needs to be offset by the
+	   size of m
+	*/
+	-> (isneg, mant, exp)
+}
+

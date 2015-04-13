@@ -1,0 +1,96 @@
+lib sys =
+	sys+freebsd-x64.myr
+	sys+linux-x64.myr
+	sys+osx-x64.myr
+	syscall+freebsd-x64.s
+	syscall+linux-x64.s
+	syscall+osx-x64.s
+	syserrno+linux.myr
+	syserrno+osx.myr
+	systypes.myr
+	ifreq+freebsd.myr
+	ifreq+linux.myr
+	ifreq+osx.myr
+	ifreq+plan9.myr	# dummy file: plan9 doesn't have ifreq
+	util+plan9-x64.s
+	util+posixy-x64.s
+;;
+
+lib std {inc=.} =
+	lib sys
+
+	# portable files
+	alloc.myr
+	bigint.myr
+	bitset.myr
+	blat.myr
+	bytebuf.myr
+	chartype.myr
+	clear.myr
+	cmp.myr
+	cstrconv.myr
+	dial+posixy.myr
+	dial+plan9.myr
+	die.myr
+	dirname.myr
+	endian.myr
+	env+posixy.myr
+	env+plan9.myr
+	errno.myr
+	execvp.myr
+	extremum.myr
+	fltbits.myr
+	fltfmt.myr
+	fmt.myr
+	getcwd.myr
+	hashfuncs.myr
+	hasprefix.myr
+	hassuffix.myr
+	htab.myr
+	getint.myr
+	intparse.myr
+	ipparse.myr
+	mk.myr
+	mkpath.myr
+	now.myr
+	option.myr
+	optparse.myr
+	pathjoin.myr
+	putint.myr
+	rand.myr
+	resolve+posixy.myr
+	resolve+plan9.myr
+	result.myr
+	search.myr
+	slcp.myr
+	sldup.myr
+	sleq.myr
+	slfill.myr
+	sljoin.myr
+	slpush.myr
+	slput.myr
+	slurp.myr
+	sort.myr
+	spork.myr
+	strfind.myr
+	strjoin.myr
+	strsplit.myr
+	strstrip.myr
+	syswrap+plan9.myr
+	syswrap-ss+posixy-linux.myr
+	syswrap-ss+posixy-osx.myr
+	syswrap+posixy.myr
+	swap.myr
+	try.myr
+	types.myr
+	units.myr
+	utf.myr
+	varargs.myr
+
+	# platform specific files
+	dir+freebsd.myr
+	dir+linux.myr
+	dir+osx.myr
+	wait+posixy.myr
+	wait+plan9.myr
+;;
