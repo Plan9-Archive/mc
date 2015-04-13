@@ -1,0 +1,7 @@
+TODO:
+    - Closures                  [Tests: closure]
+    - Not-boneheaded asm        [Tests: ]
+    - Optimized asm             [Tests: ]
+    - Use-def analysis          [Tests: usedef]
+    - Deferred code             [Tests: ]
+    - Module-mains              [Tests: ]
