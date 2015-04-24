@@ -1,0 +1,148 @@
+use sys
+use "cstrconv.use"
+use "option.use"
+use "types.use"
+use "errno.use"
+
+pkg std =
+	type fd		= sys.fd
+	type pid	= sys.pid
+	type fdopt	= sys.fdopt
+	type whence	= sys.whence
+
+	type sysinfo = struct
+		system	: byte[:]
+		version	: byte[:]
+		release	: byte[:]
+		arch	: byte[:]
+		uname	: sys.utsname	/* storage */
+	;;
+
+	const Failmem	: byte#	= -1 castto(byte#)
+
+	const Seekset	: whence = sys.Seekset	castto(whence)
+	const Seekcur	: whence = sys.Seekcur	castto(whence)
+	const Seekend	: whence = sys.Seekend	castto(whence)
+
+	const Ordonly  	: fdopt = sys.Ordonly	castto(fdopt)
+	const Owronly  	: fdopt = sys.Owronly	castto(fdopt)
+	const Ordwr    	: fdopt = sys.Ordwr	castto(fdopt)
+	const Ocreat   	: fdopt = sys.Ocreat	castto(fdopt)
+	const Otrunc   	: fdopt = sys.Otrunc	castto(fdopt)
+	const Oappend  	: fdopt = sys.Oappend	castto(fdopt)
+	const Odir	: fdopt = sys.Odir	castto(fdopt)
+
+	/* fd stuff */
+	const open	: (path : byte[:], opts : fdopt -> fd)
+	const openmode	: (path : byte[:], opts : fdopt, mode : int64 -> fd)
+	const close	: (fd : fd -> int64)
+	const creat	: (path : byte[:], mode : int64 -> fd)
+	const read	: (fd : fd, buf : byte[:] -> size)
+	const write	: (fd : fd, buf : byte[:] -> size)
+	const pipe	: (fds : fd[2]# -> int64)
+	const seek	: (fd : fd, delta : off, whence : whence -> off)
+	const dup2	: (ofd : fd, nfd : fd -> fd)
+
+	/* useful/portable bits of stat */
+	const fmtime	: (f : byte[:]	-> option(time))
+	const fsize	: (f : byte[:]	-> option(off))
+	const fexists	: (f : byte[:]	-> bool)
+
+	/* useful/portable bits of uname */
+	const getsysinfo	: (si : sysinfo# -> void)
+
+	/* path manipulation */
+	const mkdir	: (path : byte[:], mode : int64 -> int64)
+	const remove	: (path : byte[:] -> bool)
+	const chdir	: (path : byte[:] -> bool)
+
+	/* process stuff */
+	const getpid	: ( -> pid)
+	const suicide	: ( -> void)
+	const fork	: (-> pid)
+	const execv	: (cmd : byte[:], args : byte[:][:] -> int64)
+	const execve	: (cmd : byte[:], args : byte[:][:], env : byte[:][:] -> int64)
+	const waitpid	: (pid:pid, loc:int32#, opt : int64	-> int64)
+
+	pkglocal const Canunmap	: bool = true
+	pkglocal const getmem	: (sz : size -> byte#)
+	pkglocal const freemem	: (p : byte#, sz : size -> void)
+	pkglocal const curtime	: (-> time)
+;;
+
+/* fd stuff */
+const open	= {path, opts;	-> sys.open(path, opts castto(sys.fdopt)) castto(fd)}
+const openmode	= {path, opts, mode;	-> sys.openmode(path, opts castto(sys.fdopt), mode) castto(fd)}
+const close	= {fd;		-> sys.close(fd castto(sys.fd))}
+const creat	= {path, mode;	-> sys.creat(path, mode) castto(fd)}
+const read	= {fd, buf;	-> sys.read(fd castto(sys.fd), buf) castto(size)}
+const write	= {fd, buf;	-> sys.write(fd castto(sys.fd), buf) castto(size)}
+const pipe	= {fds;		-> sys.pipe(fds castto(sys.fd[2]#))}
+const seek	= {fd, delta, whence;	-> sys.lseek(fd castto(sys.fd), delta castto(sys.off), whence castto(sys.whence)) castto(off)}
+const dup2	= {ofd, nfd;	-> sys.dup2(ofd castto(sys.fd), nfd castto(sys.fd)) castto(fd)}
+
+/* path manipulation */
+const mkdir	= {path, mode;	-> sys.mkdir(path, mode)}
+const chdir	= {path;	-> sys.chdir(path) == 0}
+const remove	= {path;	-> sys.unlink(path) == 0}
+
+/* useful/portable bits of uname */
+const getsysinfo = {si
+	sys.uname(&si.uname)
+	si.system = cstrconv(si.uname.system[:])
+	si.version = cstrconv(si.uname.version[:])
+	si.release = cstrconv(si.uname.release[:])
+	si.arch = cstrconv(si.uname.machine[:])
+}
+
+/* process stuff */
+const getpid	= {;		-> sys.getpid() castto(pid)}
+const suicide	= {;		sys.kill(sys.getpid(), 6)}	/* kill self with sigabort */
+const fork	= {;		-> sys.fork() castto(pid)}
+const execv	= {cmd, args;	-> sys.execv(cmd, args)}
+const execve	= {cmd, args, env;	-> sys.execve(cmd, args, env)}
+const sleep	= {time;	sys.sleep(time)}
+
+/* memory stuff */
+const getmem	= {sz;		-> sys.mmap(0 castto(byte#), sz castto(sys.size), sys.Mprotrw, sys.Mpriv | sys.Manon, -1, 0)}
+const freemem	= {p, sz;	sys.munmap(p, sz castto(sys.size))}
+const curtime = {
+	var tm, sec, nsec
+
+	if sys.clock_gettime(`sys.Clockrealtime, &tm) == 0
+		sec = tm.sec
+		nsec = tm.nsec castto(uint64)
+		-> (sec*1_000_000 + nsec/1000) castto(time)
+	else
+		-> -1
+	;;
+}
+
+const fexists = {path
+	var sb
+
+	-> sys.stat(path, &sb) == 0
+}
+
+const fmtime = {path
+	var sb
+	var sec, nsec
+
+	if sys.stat(path, &sb) == 0
+		sec = sb.mtime.sec castto(time)
+		nsec = sb.mtime.nsec castto(time)
+		-> `Some sec*1000 + nsec/1_000_000
+	else
+		-> `None
+	;;
+}
+
+const fsize = {path
+	var sb
+
+	if sys.stat(path, &sb) == 0
+		-> `Some (sb.size castto(off))
+	else
+		-> `None
+	;;
+}

@@ -1,0 +1,7 @@
+sub =
+	mbld
+	libstd
+	libbio
+	libregex
+;;
+

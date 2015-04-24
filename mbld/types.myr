@@ -1,0 +1,66 @@
+use std
+
+pkg bld =
+	type build = struct
+		/* build state */
+		basedir	: byte[:]
+		bldfile	: byte[:]
+		curdir	: byte[:]
+		built	: std.htab(byte[:], bool)#	/* set of targets built in this run */
+
+		/* build params */
+		all	: byte[:][:]			/* all targets, in reverse topological order */
+		targs	: std.htab(byte[:], targ)#	/* dir => target mapping */
+		tdeps	: std.htab(byte[:], byte[:][:])	/* targname => depname[:] mapping */
+		gensrc	: std.htab(byte[:], gentarg#)#	/* generated src => generating target mapping */
+		prefix	: byte[:]
+		system	: byte[:]
+		arch	: byte[:]
+	;;
+
+	type targ = union
+		`Bin	myrtarg#
+		`Lib	myrtarg#
+		`Test	myrtarg#
+		`Gen	gentarg#
+		`Man	mantarg#
+	;;
+
+	type myrtarg = struct
+		islib	: bool
+		dir	: byte[:]
+		name	: byte[:]
+		inputs	: byte[:][:]
+		libdeps	: (byte[:], byte[:], byte[:])[:]	/* dir, lib, targname */
+		install	: bool
+		runtime	: byte[:]
+		incpath	: byte[:][:]
+		ldscript	: byte[:]
+	;;
+
+	type gentarg = struct
+		dir	: byte[:]
+		out	: byte[:][:]
+		cmd	: byte[:][:] 
+		deps	: byte[:][:] 
+		durable	: bool
+		/* we can have multiple outputs, but we only want to run once for each */
+		done	: bool
+	;;
+
+	type mantarg = struct
+		dir	: byte[:]
+		pages	: byte[:][:]
+	;;
+
+	type depgraph = struct
+		roots	: byte[:][:]
+		deps	: std.htab(byte[:], byte[:][:])#
+		libs	: std.htab(byte[:], byte[:][:])#
+		input	: std.htab(byte[:], byte[:])#
+		sources	: std.htab(byte[:], bool)#
+		updated	: std.htab(byte[:], bool)#
+		seen	: std.htab(byte[:], bool)#
+		done	: std.htab(byte[:], bool)#
+	;;
+;;

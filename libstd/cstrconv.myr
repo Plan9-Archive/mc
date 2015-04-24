@@ -1,0 +1,40 @@
+use "types.use"
+
+pkg std =
+	const cstrlen	: (buf : byte[:] -> size)
+	const cstrconv	: (buf : byte[:] -> byte[:])
+	const cstrconvp	: (p : byte# -> byte[:])
+;;
+
+const cstrconv = {buf
+	var i
+
+	for i = 0; i < buf.len; i++
+		if buf[i] == 0
+			-> buf[:i]
+		;;
+	;;
+	-> buf
+}
+
+const cstrconvp = {p
+	var i, base
+
+	i = 0
+	base = p castto(intptr)
+	while ((base + i) castto(byte#))# != 0
+		i++
+	;;
+	-> p[:i]
+}
+
+const cstrlen = {buf
+	var i
+
+	for i = 0; i < buf.len; i++
+		if buf[i] == 0
+			break
+		;;
+	;;
+	-> i
+}
