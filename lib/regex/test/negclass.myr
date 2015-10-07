@@ -1,0 +1,72 @@
+use std
+
+use "testmatch.use"
+
+const main = {
+	asciiclass()
+	set()
+	/*
+	unicodeclass()
+	negasciiclass()
+	negasciirange()
+	negset()
+	*/
+}
+
+const asciiclass = {
+	/* \D success */
+	testmatch("\\D", "x", `std.Some [][:])
+	testmatch("\\D+", "xa!#^cs", `std.Some [][:])
+
+	/* \D fail: end of ranges chars */
+	testmatch("\\D", "0", `std.None)
+	testmatch("\\D", "9", `std.None)
+	testmatch("\\D+", "a35x", `std.None)
+	testmatch("\\D+", "13688", `std.None)
+
+	/* \X success */
+	testmatch("\\X", "Z", `std.Some [][:])
+	testmatch("\\X\\X", "gg", `std.Some [][:])
+	/* \X fail */
+	testmatch("\\X", "a", `std.None)
+	testmatch("\\X+", "zz13b8cDEf", `std.None)
+
+	/* \S success */
+	testmatch("\\S", "a", `std.Some [][:])
+	testmatch("\\S\\S", "i%", `std.Some [][:])
+	testmatch("\\S+", "alskd690!#!!", `std.Some [][:])
+
+	/* \S fail */
+	testmatch("\\S", " ", `std.None)
+	testmatch("\\S\\S", "\t\n", `std.None)
+	testmatch("\\S+", "\t \nkait", `std.None)
+
+	/* word success */
+	testmatch("\\W+", "!%!^^@@!^", `std.Some [][:])
+	/* word fail */
+	testmatch("\\W+", "a^#$bcABC0123_", `std.None)
+
+	/* \H success */
+	testmatch("\\H", "\n", `std.Some [][:])
+	testmatch("\\H\\H", "\n\r", `std.Some [][:])
+	/* \H fail */
+	testmatch("\\H+", "\t \t.", `std.None)
+	testmatch("\\H\\H", "\t ", `std.None)
+	testmatch("\\H+", "\ta35 \t ", `std.None)
+}
+
+const set = {
+	/* ranges: should succeed */
+	testmatch("[^a-z]*", "ABCD", `std.Some [][:])
+	testmatch("[^a-zA-Z]*", "1234", `std.Some [][:])
+	testmatch("[^a-zA-Z0-9_]*", "-^^-", `std.Some [][:])
+	testmatch("[^abc]*", "d6d", `std.Some [][:])
+	testmatch("[^a-zABC]*", "!^!!))#", `std.Some [][:])
+
+	/* ranges: should fail */
+	testmatch("[^a-z]*", "abcd", `std.None)
+	testmatch("[^a-zA-Z]*", "abCD", `std.None)
+	testmatch("[^a-zA-Z0-9_]*", "_abCD018", `std.None)
+	testmatch("[^abc]*", "abba", `std.None)
+	testmatch("[^a-zABC]*", "abBa", `std.None)
+}

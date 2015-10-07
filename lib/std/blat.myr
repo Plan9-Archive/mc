@@ -1,0 +1,32 @@
+use "syswrap.use"
+use "result.use"
+
+pkg std =
+	const blat : (path : byte[:], buf : byte[:], perm : int64 -> bool)
+	const fblat : (f : fd, buf : byte[:] -> bool)
+;;
+
+const blat = {path, buf, perm
+	match openmode(path, Ocreat|Owronly, perm)
+	| `Ok fd:	-> fblat(fd, buf)
+	| `Fail e:	-> false
+	;;
+}
+
+
+const fblat = {fd, buf
+	var count
+
+	count = 0
+	while true
+		match write(fd, buf[count:])
+		| `Fail e:	-> false
+		| `Ok n:
+			if n == 0
+				break
+			;;
+			count += n
+		;;
+	;;
+	-> count == buf.len
+}

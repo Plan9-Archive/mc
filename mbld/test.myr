@@ -1,0 +1,219 @@
+use std
+
+use "build.use"
+use "clean.use"
+use "deps.use"
+use "opts.use"
+use "parse.use"
+use "types.use"
+use "util.use"
+
+use "config.use"
+
+pkg bld =
+	const test	: (b : build# -> void)
+;;
+
+const test = {b
+	var tests : (byte[:][:], byte[:])[:]
+	var bincmd
+	var failed : byte[:][:], ok
+
+	/* no implicit tests to run */
+	tests = [][:]
+	if std.fexists("test")
+		for tn in b.all
+			match gettarg(b.targs, tn)
+			| `Bin bt:
+				tests = std.sljoin(tests, buildtests(b, bt))
+			| `Lib lt:
+				tests = std.sljoin(tests, buildtests(b, lt))
+			| _:
+				/* nothing */
+			;;
+		;;
+	;;
+	for tn in b.all
+		match gettarg(b.targs, tn)
+		| `Bin t:
+			if !t.istest
+				continue
+			;;
+			if t.incpath.len == 0 || !std.sleq(t.incpath[0], ".")
+				t.incpath = std.slput(t.incpath, 0, std.sldup("."))
+			;;
+			buildbin(b, t, false)
+			bincmd = std.sldup([std.strcat("./", t.name)][:])
+			tests = std.slpush(tests, (bincmd, std.sldup(t.dir)))
+		| `Cmd t:
+			if !t.istest
+				continue
+			;;
+			tests = std.slpush(tests, (dupcmd(t.cmd), std.sldup(t.dir)))
+		| _:
+			/* skip */
+		;;
+	;;
+
+	ok = true
+	failed = [][:]
+	for (c, dir) in tests
+		setdir(b, dir)
+		if !runtest(c)
+			ok = false
+			failed = std.slpush(failed, c[0])
+		;;
+
+	;;
+	for (bin, dir) in tests
+		freecmd(bin)
+		std.slfree(dir)
+	;;
+	std.slfree(tests)
+	if tests.len == 0
+		->
+	;;
+
+	printfailed(failed)
+	std.slfree(failed)
+	if ok
+		std.put("TESTS PASSED\n")
+	else
+		std.put("TESTS FAILED\n")
+	;;
+}
+
+const printfailed : (f : byte[:][:] -> void) = {failed
+	if failed.len > 10
+		std.put("{} tests failed\n", failed.len)
+	elif failed.len > 0
+		std.put("FAILURES: ")
+		for t in failed
+			std.put("{} ", t)
+		;;
+		std.put("\n")
+	;;
+}
+
+const dupcmd = {cmd
+	var ret
+
+	ret = [][:]
+	for c in cmd
+		ret = std.slpush(ret, std.sldup(c))
+	;;
+	-> ret
+}
+
+const freecmd = {cmd
+	for c in cmd
+		std.slfree(c)
+	;;
+	std.slfree(cmd)
+}
+
+const buildtests = {b, targ
+	var tt, bin, tests
+	var cmd
+
+	tests = [][:]
+	setdir(b, targ.dir)
+	for s in targ.inputs
+		match testpath(s)
+		| `std.None: /* nothing to do */
+		| `std.Some path:
+			bin = srcswapsuffix(path, "")
+			tt = [
+				.name = bin,
+				.dir = targ.dir,
+				.inputs = [path][:],
+				.install = false,
+				.libdeps = std.sldup(targ.libdeps),
+				.incpath = std.slput(std.sldup(targ.incpath), 0, "."),
+			]
+
+			cleantest(b, path)
+			buildbin(b, &tt, true)
+			cmd = std.sldup([std.strcat("./", bin)][:])
+			tests = std.slpush(tests, (cmd, std.sldup(targ.dir)))
+			std.slfree(tt.libdeps)
+			std.slfree(tt.incpath)
+			std.slfree(path)
+		;;
+	;;
+	-> tests
+}
+
+const cleantest = {b, src
+	var obj, bin, log, usef
+
+	obj = srcswapsuffix(src, config.Objsuffix)
+	log = srcswapsuffix(src, ".log")
+	usef = srcswapsuffix(src, ".use")
+	bin = srcswapsuffix(src, "")
+
+	std.remove(obj)
+	std.remove(usef)
+	std.remove(log)
+	std.remove(bin)
+
+	std.slfree(obj)
+	std.slfree(usef)
+	std.slfree(log)
+	std.slfree(bin)
+}
+
+const runtest = {cmd
+	var r, log
+
+	std.put("run")
+	for c in cmd
+		std.put(" {}", c)
+	;;
+	std.put(":\t")
+	match std.spork(cmd)
+	| `std.Fail m:
+		std.fatal("\nunable to run test: {}\n", m)
+	| `std.Ok (pid, infd, outfd):
+		log = std.strcat(cmd[0], ".log")
+		match std.fslurp(outfd)
+		| `std.Ok "":	/* empty output; nothing to log */
+		| `std.Ok buf:
+			std.blat(log, buf, 0o644)
+		| `std.Fail m:
+		;;
+		std.slfree(log)
+
+		r = false
+		match std.wait(pid)
+		| `std.Wfailure:	std.put("FAIL\n")
+		| `std.Wsignalled:	std.put("CRASH\n")
+		| `std.Wsuccess:
+			std.put("PASS\n")
+			r = true
+		| _:	std.put("???\n")
+		;;
+	;;
+	-> r
+}
+
+const testpath = {s
+	var path, file
+
+	path = std.pathcat("./test", s)
+	if std.fexists(path)
+		-> `std.Some path
+	;;
+	match std.strfind(s, "+")
+	| `std.None:
+	| `std.Some idx:
+		file = std.strcat(s[:idx], ".myr")
+		path = std.pathcat("./test", file)
+		std.slfree(file)
+		if std.fexists(path)
+			-> `std.Some path
+		;;
+	;;
+	-> `std.None
+}
+

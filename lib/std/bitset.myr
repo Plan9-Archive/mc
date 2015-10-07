@@ -1,0 +1,152 @@
+use "alloc.use"
+use "die.use"
+use "extremum.use"
+use "mk.use"
+use "slcp.use"
+use "sldup.use"
+use "slfill.use"
+use "types.use"
+
+pkg std =
+	type bitset = struct
+		bits : size[:]
+	;;
+
+	const mkbs	: (-> bitset#)
+	const bsdup	: (bs : bitset# -> bitset#)
+	const bsfree	: (bs : bitset# -> void)
+
+	const bsmax	: (a : bitset# -> size)
+
+	generic bsput	: (bs : bitset#, v : @a::(integral,numeric) -> bool)
+	generic bsdel	: (bs : bitset#, v : @a::(integral,numeric) -> bool)
+	generic bshas	: (bs : bitset#, v : @a::(integral,numeric) -> bool)
+
+	const bsdiff	: (a : bitset#, b : bitset# -> void)
+	const bsintersect	: (a : bitset#, b : bitset# -> void)
+	const bsunion	: (a : bitset#, b : bitset# -> void)
+	const bseq	: (a : bitset#, b : bitset# -> bool)
+	const bsissubset	: (a : bitset#, b : bitset# -> bool)
+
+
+	const bsclear	: (bs : bitset# -> bitset#)
+;;
+
+const mkbs = {
+	-> zalloc()
+}
+
+const bsdup = {bs
+	-> mk([.bits=sldup(bs.bits)])
+}
+
+const bsfree = {bs
+	slfree(bs.bits)
+	free(bs)
+}
+
+const bsclear = {bs
+	slfill(bs.bits, 0)
+	-> bs
+}
+
+const bsmax = {bs
+	-> bs.bits.len * sizeof(size) * 8
+}
+
+generic bsput = {bs, v
+	var idx, off, has
+
+	idx = (v castto(size)) / (8*sizeof(size))
+	off = (v castto(size)) % (8*sizeof(size))
+	ensurelen(bs, idx)
+
+	has = (bs.bits[idx] & (1 << off)) != 0
+	bs.bits[idx] |= (1 << off)
+	-> has
+}
+
+generic bsdel = {bs, v
+	var idx, off, had
+
+	had = false
+	idx = (v castto(size)) / (8*sizeof(size))
+	off = (v castto(size)) % (8*sizeof(size))
+	if idx < bs.bits.len
+		had = (bs.bits[idx] & (1 << off)) != 0
+		bs.bits[idx] &= ~(1 << off)
+	;;
+	-> had
+}
+
+generic bshas = {bs, v
+	var idx
+	var off
+
+	idx = (v castto(size)) / (8*sizeof(size))
+	off = (v castto(size)) % (8*sizeof(size))
+	if idx >= bs.bits.len
+		-> false
+	;;
+	-> (bs.bits[idx] & (1 << off)) != 0
+}
+
+const bsunion = {a, b
+	eqsz(a, b)
+	for var i = 0; i < b.bits.len; i++
+		a.bits[i] |= b.bits[i]
+	;;
+}
+
+const bsintersect = {a, b
+	var n
+
+	n = min(a.bits.len, b.bits.len)
+	for var i = 0; i < n; i++
+		a.bits[i] &= b.bits[i]
+	;;
+}
+
+const bsdiff = {a, b
+	var n
+
+	n = min(b.bits.len, a.bits.len)
+	for var i = 0; i < n; i++
+		a.bits[i] &= ~b.bits[i]
+	;;
+}
+
+const bsissubset = {a, b
+	eqsz(a, b);
+	for var i = 0; i < a.bits.len; i++
+		if (b.bits[i] & a.bits[i]) != b.bits[i]
+			-> false
+		;;
+	;;
+	-> true
+}
+
+const bseq = {a, b
+	eqsz(a, b)
+	for var i = 0; i < a.bits.len; i++
+		if a.bits[i] != b.bits[i]
+			-> false
+		;;
+	;;
+	-> true
+}
+
+const ensurelen = {bs, len
+	if bs.bits.len <= len
+		bs.bits = slzgrow(bs.bits, len + 1)
+	;;
+}
+
+const eqsz = {a, b
+	var sz
+
+	sz = max(a.bits.len, b.bits.len)
+	ensurelen(a, sz)
+	ensurelen(b, sz)
+}
+

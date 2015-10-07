@@ -1,0 +1,91 @@
+lib std {inc=.} =
+	lib ../sys:sys
+
+	# portable files
+	alloc.myr
+	assert.myr
+	bigint.myr
+	bitset.myr
+	blat.myr
+	chartype.myr
+	clear.myr
+	cmp.myr
+	cstrconv.myr
+	die.myr
+	dirname.myr
+	endian.myr
+	errno.myr
+	execvp.myr
+	extremum.myr
+	fltbits.myr
+	fltfmt.myr
+        fmt.myr
+	fmtfuncs.myr
+	fndup.myr
+	getcwd.myr
+	getint.myr
+	hashfuncs.myr
+	hasprefix.myr
+	hassuffix.myr
+	htab.myr
+	intparse.myr
+        introspect.myr
+	ipparse.myr
+	mk.myr
+	mkpath.myr
+	now.myr
+	option.myr
+	optparse.myr
+	pathjoin.myr
+	putint.myr
+	rand.myr
+	result.myr
+	search.myr
+	slcp.myr
+	sldup.myr
+	sleq.myr
+	slfill.myr
+	sljoin.myr
+	slpush.myr
+	slput.myr
+	slurp.myr
+	sort.myr
+	spork.myr
+	strbuf.myr
+	strfind.myr
+	strjoin.myr
+	strsplit.myr
+	strstrip.myr
+	swap.myr
+	try.myr
+	types.myr
+	units.myr
+	utf.myr
+	varargs.myr
+
+	# asm optimizations
+	memops.myr
+	memops-impl.myr
+	memops-impl+posixy-x64.s
+	memops-impl+plan9-x64.s
+
+	# platform specific files
+	env+plan9.myr
+	env+posixy.myr
+	errno+plan9.myr
+	dir+freebsd.myr
+	dir+linux.myr
+	dir+osx.myr
+	wait+posixy.myr
+	wait+plan9.myr
+	dial+posixy.myr
+	dial+plan9.myr
+	resolve+posixy.myr
+	resolve+plan9.myr
+	syswrap-ss+linux.myr
+	syswrap-ss+osx.myr
+	syswrap-ss+plan9.myr
+	syswrap-ss+freebsd.myr
+	syswrap+plan9.myr
+	syswrap+posixy.myr
+;;
