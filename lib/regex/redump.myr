@@ -1,0 +1,90 @@
+use std
+use bio
+use regex
+
+const main = {args
+	var cmd, comp
+	var verbose
+	var fd
+
+	verbose = false
+	cmd = std.optparse(args, &[
+		.argdesc = "regex [inputs...]",
+		.minargs = 1,
+		.maxargs = 1,
+		.opts = [
+			[.opt='v', .desc="dump verbose regex output"]
+		][:],
+	])
+	for opt in cmd.opts
+		match opt
+		| ('v', _):	verbose = true
+		| _:	std.fatal("Unknown argument")
+		;;
+	;;
+	if verbose
+		comp = regex.dbgcompile(cmd.args[0])
+	else
+		comp = regex.compile(cmd.args[0])
+	;;
+	match comp
+	| `std.Fail m:	
+		std.fatal("unable to compile regex: {}\n", m)
+	| `std.Ok re:
+		if cmd.args.len > 1
+			runall(re, cmd.args)
+		else
+			fd = bio.mkfile(0, bio.Rd)
+			dump(re, fd)
+			bio.close(fd)
+		;;
+	;;
+}
+
+const runall = {re, files
+
+	for f in files
+		match bio.open(f, bio.Rd)
+		| `std.Ok fd:
+			dump(re, fd)
+			bio.close(fd)
+		| `std.Fail m:
+			std.fatal("failed to open {}: {}\n", f, m)
+		;;
+	;;
+}
+
+const dump = {re, fd 
+	while true
+		match bio.readln(fd)
+		| `bio.Ok ln:
+			show(re, ln, regex.exec(re, ln))
+			std.slfree(ln)
+		| `bio.Eof:
+			break
+		| `bio.Err e:
+			std.put("error reading from input: {}", e)
+			break
+		;;
+	;;
+}
+
+const show = {re, ln, mg
+	var i
+
+	match mg
+	| `std.Some rl:
+		std.put("Matched: {}\n", rl[0])
+		for i = 1; i < rl.len; i++
+			std.put("\tgroup {}: {}\n", i, rl[i])
+		;;
+	| `std.None:
+		std.put("Match failed:\n")
+		std.put("\t{}\n", ln)
+		std.put("\t")
+		for i = 0; i < re.strp - 1; i++
+			std.put("~")
+		;;
+		std.put("^\n")
+	;;
+}

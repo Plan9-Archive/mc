@@ -1,0 +1,68 @@
+use "die"
+use "alloc"
+use "env"
+use "errno"
+use "fmt"
+use "option"
+use "pathjoin"
+use "memops"
+use "rand"
+use "result"
+use "sldup"
+use "syswrap"
+use "types"
+
+pkg std =
+	const mktemp	: (base : byte[:], opt : fdopt, mode : int64 -> std.result((fd, byte[:]), errno))
+	const mktemppath	: (base : byte[:] -> byte[:])
+;;
+
+const Retries = 100
+
+const mktemp = {base, opt, mode
+	var tmpdir, path
+
+	match std.getenv("TMPDIR")
+	| `std.Some d:	tmpdir = d
+	| `std.None:	tmpdir = "/tmp"
+	;;
+
+	for var i = 0; i < Retries; i++
+		path = randpath(tmpdir, base)
+		match std.openmode(path, opt | Ocreat, mode)
+		| `Fail e:
+			if e != Eexist
+				std.slfree(path)
+				-> `Fail e
+			;;
+		| `Ok fd:
+			-> `Ok (fd, path)
+		;;
+		std.slfree(path)
+	;;
+	-> `Fail Eexist
+}
+
+const mktemppath = {base
+	var tmpdir, path
+
+	match std.getenv("TMPDIR")
+	| `std.Some d:	tmpdir = d
+	| `std.None:	tmpdir = std.sldup("/tmp")
+	;;
+
+	path = randpath(tmpdir, base)
+	std.slfree(tmpdir)
+	-> path
+}
+
+const randpath = {dir, base
+	var f, p
+	var v : uint64
+
+	v = std.randnum()
+	f = fmt("{}{}", base, v)
+	p = pathcat(dir, f)
+	std.slfree(f)
+	-> p
+}

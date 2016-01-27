@@ -1,0 +1,107 @@
+/* operator name, is it pure, pretty name */
+O(Obad,         1,	OTmisc,	"BAD")
+O(Oadd,	        1,	OTbin,	"+")
+O(Osub,	        1,	OTbin,	"-")
+O(Omul,	        1,	OTbin,	"*")
+O(Odiv,	        1,	OTbin,	"/")
+O(Omod,	        1,	OTbin,	"%")
+O(Oneg,	        1,	OTpre,	"-")
+O(Obor,	        1,	OTbin,	"|")
+O(Oband,	1,	OTbin,  "&")
+O(Obxor,	1,	OTbin,  "^")
+O(Obsl,	        1,	OTbin,  "<<")
+O(Obsr,	        1,	OTbin,  ">>")
+O(Obnot,	1,	OTpre,  "~")
+O(Opreinc,	1,	OTpre,  "++")
+O(Opostinc,	1,	OTpost, "++")
+O(Opredec,	1,	OTpre,  "--")
+O(Opostdec,	1,	OTpost, "--")
+O(Oaddr,	1,	OTpre,  "&")
+O(Oderef,	1,	OTpost, "#")
+O(Olor,	        1,	OTbin,  "||")
+O(Oland,	1,	OTbin,  "&&")
+O(Olnot,	1,	OTpre,  "!")
+O(Oeq,	        1,	OTbin,  "==")
+O(One,	        1,	OTbin,  "!=")
+O(Ogt,	        1,	OTbin,  ">")
+O(Oge,	        1,	OTbin,  ">=")
+O(Olt,	        1,	OTbin,  "<")
+O(Ole,	        1,	OTbin,  "<=")
+O(Oasn,	        1,	OTbin,  "=")
+O(Oaddeq,	1,	OTbin,  "+=")
+O(Osubeq,	1,	OTbin,  "-=")
+O(Omuleq,	1,	OTbin,  "*=")
+O(Odiveq,	1,	OTbin,  "/=")
+O(Omodeq,	1,	OTbin,  "%=")
+O(Oboreq,	1,	OTbin,  "|=")
+O(Obandeq,	1,	OTbin,  "&=")
+O(Obxoreq,	1,	OTbin,  "^=")
+O(Obsleq,	1,	OTbin,  "<<=")
+O(Obsreq,	1,	OTbin,  ">>=")
+O(Oidx,	        1,	OTmisc,  NULL)
+O(Oslice,	1,	OTmisc,  NULL)
+O(Omemb,	1,	OTmisc,  NULL)
+O(Osize,	1,	OTmisc,  NULL)
+O(Ocall,	0,	OTmisc,  NULL)
+O(Ocast,	1,	OTmisc,  NULL)
+O(Oret,	        1,	OTpre,  "->")
+O(Ojmp,	        0,	OTpre,  "goto")
+O(Obreak,	0,	OTzarg, "break")
+O(Ocontinue,	0,	OTzarg, "continue")
+O(Ovar,	        1,	OTmisc, NULL)
+O(Ogap,	        1,	OTmisc, NULL)
+O(Olit,	        1,	OTmisc, NULL)
+O(Oucon,	1,	OTmisc, "`")
+O(Otup,	        1,	OTmisc, NULL)
+O(Ostruct,	1,	OTmisc, NULL)
+O(Oarr,	        1,	OTmisc, NULL)
+
+/* all below this point are backend-only */
+O(Odead,        0,      OTmisc, "DEAD")         /* dead code */
+O(Oundef,       0,      OTmisc, "UNDEF")        /* undefined var */
+O(Odef,         0,      OTmisc, "DEF")          /* defined var */
+O(Ocjmp,	1,	OTmisc, "CJMP")         /* conditional jump */
+O(Ovjmp,	1,	OTmisc, "VJMP")		/* variable arg list jump */
+O(Oset,	        1,	OTbin,  "=")            /* store to var */
+O(Osllen,	1,	OTpre,  "SLLEN")        /* size of slice */
+O(Oslbase,	1,	OTpre,  "SLBASE")       /* base of sice */
+O(Outag,	1,	OTpre,  "UTAG")	        /* tag of union */
+O(Oudata,	1,	OTpre,  "UDATA")        /* pointer to contents of union */
+O(Otupget,	1,	OTpre,  "TUPGET")        /* pointer to contents of union */
+O(Oblit,	1,	OTbin,  "BLIT")         /* blit memory */
+O(Oclear,       1,      OTpre,  "CLEAR")        /* zero */
+O(Ocallind,     1,      OTpre,  "CALL")         /* call with environment */
+
+/* integer conversions */
+O(Otrunc,	1,	OTmisc, NULL)   /* truncating cast */
+O(Ozwiden,	1,	OTmisc, NULL)   /* zero-extending widening cast */
+O(Oswiden,	1,	OTmisc, NULL)   /* sign-extending widening cast */
+
+/* float conversions */
+O(Oflt2int,	1,	OTmisc, NULL)   /* float to int conversion */
+O(Oint2flt,	1,	OTmisc, NULL)   /* int to float conversion */
+O(Oflt2flt,	1,	OTmisc, NULL)   /* flt32<->flt64 conversion */
+
+/* floating arithmetic */
+O(Ofadd,	1,	OTmisc, NULL)
+O(Ofsub,	1,	OTmisc, NULL)
+O(Ofmul,	1,	OTmisc, NULL)
+O(Ofdiv,	1,	OTmisc, NULL)
+O(Ofneg,	1,	OTmisc, NULL)
+
+/* floating point comparisons */
+O(Ofeq,	        1,	OTmisc, NULL)
+O(Ofne,	        1,	OTmisc, NULL)
+O(Ofgt,	        1,	OTmisc, NULL)
+O(Ofge,	        1,	OTmisc, NULL)
+O(Oflt,	        1,	OTmisc, NULL)
+O(Ofle,	        1,	OTmisc, NULL)
+
+/* unsigned comparisons */
+O(Oueq,	        1,	OTmisc, NULL)
+O(Oune,	        1,	OTmisc, NULL)
+O(Ougt,	        1,	OTmisc, NULL)
+O(Ouge,	        1,	OTmisc, NULL)
+O(Oult,	        1,	OTmisc, NULL)
+O(Oule,	        1,	OTmisc, NULL)
+

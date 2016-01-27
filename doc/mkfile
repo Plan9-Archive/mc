@@ -1,0 +1,14 @@
+MANS=\
+	mc.1 \
+	muse.1 \
+
+all:V: $MANS
+
+install:V: $MANS
+
+uninstall:V: $MANS
+
+nuke:V: $MANS
+
+clean:V: $MANS
+

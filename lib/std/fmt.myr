@@ -1,0 +1,570 @@
+use "alloc"
+use "chartype"
+use "die"
+use "extremum"
+use "fltfmt"
+use "hashfuncs"
+use "hasprefix"
+use "htab"
+use "introspect"
+use "intparse"
+use "option"
+use "result"
+use "sleq"
+use "slpush"
+use "strbuf"
+use "strfind"
+use "strsplit"
+use "syswrap-ss"
+use "syswrap"
+use "types"
+use "utf"
+use "varargs"
+
+pkg std =
+	/* write to fd */
+	const put	: (fmt : byte[:], args : ... -> size)
+	const fput	: (fd : fd, fmt : byte[:], args : ... -> size)
+	const putv	: (fmt : byte[:], ap : valist# -> size)
+	const fputv	: (fd : fd, fmt : byte[:], ap : valist# -> size)
+
+	/* write to buffer */
+	const fmt	: (fmt : byte[:], args : ... -> byte[:])
+	const fmtv	: (fmt : byte[:], ap : valist# -> byte[:])
+
+	const bfmt	: (buf : byte[:], fmt : byte[:], args : ... -> byte[:])
+	const bfmtv	: (buf : byte[:], fmt : byte[:], ap : valist# -> byte[:])
+
+	/* write to strbuf */
+	const sbfmt	: (buf : strbuf#, fmt : byte[:], args : ... -> size)
+	const sbfmtv	: (buf : strbuf#, fmt : byte[:], ap : valist# -> size)
+
+	/* add a formatter function */
+	const fmtinstall	: (ty : byte[:], \
+		fn : (sb : strbuf#, ap : valist#, opts : (byte[:],byte[:])[:] -> void), \
+		optdesc : (byte[:], bool)[:] \
+		-> void)
+
+	$noret const fatal	: (fmt : byte[:], args : ... -> void)
+	$noret const fatalv	: (fmt : byte[:], ap : valist# -> void)
+;;
+
+const __init__ = {
+	fmtmap = mkht(strhash, streq)
+}
+
+type fmtdesc = struct
+	fn	: (sb : strbuf#, ap : valist#, opts : (byte[:],byte[:])[:] -> void)
+	optdesc	: (byte[:], bool)[:]
+;;
+
+/* same as 'put', but exits the program after printing */
+const fatal = {fmt, args
+	var ap
+
+	ap = vastart(&args)
+	putv(fmt, &ap)
+	exit(1)
+}
+
+/* same as 'putv', but exits the program after printing */
+const fatalv = {fmt, ap
+	putv(fmt, ap)
+	exit(1)
+}
+
+var fmtmap : htab(byte[:], fmtdesc)#
+
+const fmtinstall = {ty, fn, optdesc
+	htput(fmtmap, ty, [.fn=fn, .optdesc=optdesc])
+}
+
+const put = {fmt, args
+	var ap
+
+	ap = vastart(&args)
+	-> fputv(1, fmt, &ap)
+}
+
+const putv = {fmt, ap
+	-> fputv(1, fmt, ap)
+}
+
+const fput = {fd, fmt, args
+	var ap
+
+	ap = vastart(&args)
+	-> fputv(fd, fmt, &ap)
+}
+
+const fputv = {fd, fmt, ap
+	var sb, s, n
+
+	sb = mksb()
+	sbfmtv(sb, fmt, ap)
+	s = sbfin(sb)
+	n = writeall(fd, s)
+	slfree(s)
+	-> n
+}
+
+const fmt = {fmt, args
+	var ap
+
+	ap = vastart(&args)
+	-> fmtv(fmt, &ap)
+}
+
+const fmtv = {fmt, ap
+	var sb
+
+	sb = mksb()
+	sbfmtv(sb, fmt, ap)
+	-> sbfin(sb)
+}
+
+const bfmt = {buf, fmt, args
+	var ap
+
+	ap = vastart(&args)
+	-> bfmtv(buf, fmt, &ap)
+}
+
+const bfmtv = {buf, fmt, ap
+	var sb
+
+	sb = mkbufsb(buf)
+	sbfmtv(sb, fmt, ap)
+	-> sbfin(sb)
+}
+
+const sbfmt = {sb, fmt, args
+	var ap
+
+	ap = vastart(&args)
+	-> sbfmtv(sb, fmt, &ap)
+}
+
+const sbfmtv = {sb, fmt, ap -> size
+	var nfmt, nparams, orig
+	var c, params
+
+	orig = fmt
+	nparams = ap.tc.nelt
+	nfmt = 0
+	while fmt.len != 0
+		(c, fmt) = strstep(fmt)
+		match c
+		| '{':
+			if decode(fmt) == '{'
+				(c, fmt) = strstep(fmt)
+				sbputc(sb, '{')
+			else
+				(params, fmt) = getparams(fmt)
+				nfmt++
+				if nfmt > nparams
+					die("too few params for fmt\n")
+				;;
+
+				fmtval(sb, vatype(ap), ap, params)
+			;;
+		| '}':
+			if decode(fmt) == '}'
+				sbputc(sb, '}')
+			;;
+		| chr:
+			sbputc(sb, chr)
+		;;
+:fmtdone
+	;;
+	if nfmt != nparams
+		write(1, orig)
+		die("too many params for fmt\n")
+	;;
+	-> sb.len
+}
+
+const fmtval = {sb, ty, ap, params
+	var pl
+
+	match htget(fmtmap, ty)
+	| `Some f:
+		pl = parseparams(params, f.optdesc)
+		f.fn(sb, ap, pl)
+		std.slfree(pl)
+	| `None:
+		fallbackfmt(sb, params, ty, ap)
+	;;
+}
+
+const parseparams = {paramstr, optdesc
+	var params, opts
+	var o, a, ha : bool, gotarg : bool
+
+	opts = [][:]
+	if optdesc.len == 0 && paramstr.len > 0
+		std.fatal("invalid format options {}\n")
+	;;
+	params = strsplit(paramstr, ",")
+	for p in params
+		/* parse out the key/value pair */
+		match std.strfind(p, "=")
+		| `std.Some idx:
+			o = p[:idx]
+			a = p[idx+1:]
+			gotarg = true
+		| `std.None:
+			o = p
+			a = ""
+			gotarg = false
+		;;
+
+		/* verify and add the arg */
+		for (opt, hasarg) in optdesc
+			if !std.sleq(opt, o)
+				continue
+			;;
+			ha = hasarg
+			if ha == gotarg
+				opts = std.slpush(opts, (o, a))
+			else
+				std.fatal("invalid option {}", o)
+			;;
+		;;
+	;;
+	slfree(params)
+	-> opts
+}
+
+
+const fallbackfmt = {sb, params, tyenc, ap : valist# -> void
+	/* value types */
+	var t_val : bool
+	var b_val : int8, ub_val : uint8
+	var w_val : int16, uw_val : uint16
+	var i_val : int32, ui_val : uint32
+	var l_val : int64, ul_val : uint64
+	var z_val : size
+	var p_val : byte#
+        var c_val : char
+	var s_val : byte[:]
+	var f32_val : flt32, f64_val : flt64
+	var i8 : int8, i16: int16, i32 : int32
+	var by : byte
+	var i : int, i64 : int64
+	var ui8 : int8, ui16: int16, ui32 : int32
+	var ui : int, ui64 : int64
+	var subap, subenc, subname
+
+	match typedesc(tyenc)
+	| `Tynone:	/* nothing */
+	/* atomic types */
+	| `Tyvoid:
+		sbputs(sb, "void")
+	| `Tybool:
+		t_val = vanext(ap)
+		if t_val
+			sbputs(sb ,"true")
+		else
+			sbputs(sb, "false")
+		;;
+	| `Tychar:
+		c_val = vanext(ap)
+		sbputc(sb, c_val)
+	| `Tyint8:
+		b_val = vanext(ap)
+		intfmt(sb, intparams(params), true, b_val)
+	| `Tyint16:
+		w_val = vanext(ap)
+		intfmt(sb, intparams(params), true, w_val)
+	| `Tyint:
+		i_val = vanext(ap)
+		intfmt(sb, intparams(params), true, i_val)
+	| `Tyint32:
+		i_val = vanext(ap)
+		intfmt(sb, intparams(params), true, i_val)
+	| `Tyint64:
+		l_val = vanext(ap)
+		intfmt(sb, intparams(params), true, l_val)
+	| `Tybyte:
+		ub_val = vanext(ap)
+		intfmt(sb, intparams(params), false, ub_val)
+	| `Tyuint8:
+		ub_val = vanext(ap)
+		intfmt(sb, intparams(params), false, ub_val)
+	| `Tyuint16:
+		uw_val = vanext(ap)
+		intfmt(sb, intparams(params), false, uw_val)
+	| `Tyuint:
+		ui_val = vanext(ap)
+		intfmt(sb, intparams(params), false, ui_val)
+	| `Tyuint32:
+		ui_val = vanext(ap)
+		intfmt(sb, intparams(params), false, ui_val)
+	| `Tyuint64:
+		ul_val = vanext(ap)
+		intfmt(sb, intparams(params), false, ul_val)
+	| `Tyflt32:
+		f32_val = vanext(ap)
+		flt32bfmt(sb, f32_val, MNormal, 0)
+	| `Tyflt64:
+		f64_val = vanext(ap)
+		flt64bfmt(sb, f64_val, MNormal, 0)
+	| `Tyvalist:
+		sbputs(sb, "...")
+
+	/* compound types */
+	| `Typtr desc:
+		p_val = vanext(ap)
+		sbputs(sb, "0x")
+		intfmt(sb, \
+			[.base=16, .padto=2*sizeof(void#), .padfill='0'], \
+			false, p_val castto(intptr))
+	| `Tyslice desc:
+		match typedesc(desc)
+		| `Tybyte:
+			s_val = vanext(ap)
+			strfmt(sb, s_val, params)
+		| _:
+			subap = vaenter(ap)
+			sbputs(sb, "[")
+			while subap.tc.nelt != 0
+				fmtval(sb, vatype(&subap), &subap, "")
+				if subap.tc.nelt > 0
+					sbfmt(sb, ", ")
+				;;
+			;;
+			sbputs(sb, "]")
+			vabytes(ap)
+		;;
+	| `Tyfunc tc:
+		p_val = vanext(ap)
+		sbputs(sb, "func{")
+		intfmt(sb, \
+			[.base=16, .padto=2*sizeof(void#), .padfill='0'], \
+			false, p_val castto(intptr))
+		sbputs(sb, "}")
+		vabytes(ap)
+	| `Tyarray (sz, desc):
+		subap = vaenter(ap)
+		sbputs(sb, "[")
+		while subap.tc.nelt != 0
+			fmtval(sb, vatype(&subap), &subap, "")
+			if subap.tc.nelt > 0
+				sbfmt(sb, ", ")
+			;;
+		;;
+		sbputs(sb, "]")
+		vabytes(ap)
+	/* aggregate types */
+	| `Tytuple tc:
+		subap = vaenter(ap)
+		sbfmt(sb, "(")
+		for var i = 0; i < subap.tc.nelt; i++
+			fmtval(sb, vatype(&subap), &subap, "")
+			if subap.tc.nelt == 1
+				sbfmt(sb, ",")
+			elif i != subap.tc.nelt -1 
+				sbfmt(sb, ", ")
+			;;
+		;;
+		sbfmt(sb, ")")
+		vabytes(ap)
+	| `Tystruct nc:
+		subap = vaenter(ap)
+		sbfmt(sb, "[")
+		for var i = 0; i < subap.tc.nelt; i++
+			(subname, subenc) = ncpeek(&subap.tc)
+			sbfmt(sb, ".{}=", subname)
+			fmtval(sb, vatype(&subap), &subap, "")
+			if subap.tc.nelt == 1
+				sbfmt(sb, ",")
+			elif i != subap.tc.nelt -1 
+				sbfmt(sb, ", ")
+			;;
+		;;
+		sbfmt(sb, "]")
+		vabytes(ap)
+	| `Tyunion nc:
+		i_val = (ap.args castto(int32#))#
+		subap = vaenterunion(ap, i_val)
+		for var i = 0; i < i_val; i++
+			ncnext(&nc)
+		;;
+		(subname, subenc) = ncnext(&nc)
+		sbfmt(sb, "`{} ", subname)
+		fmtval(sb, subenc, &subap, "")
+		vabytes(ap)
+	| `Tyname (name, desc):
+		subap = vaenter(ap)
+		fallbackfmt(sb, params, desc, &subap)
+		vabytes(ap)
+	;;
+}
+
+const getparams = {fmt
+	var i
+
+	for i = 0; i < fmt.len; i++
+		if fmt[i] == '}' castto(byte)
+			goto foundparams
+		;;
+	;;
+	die("invalid format string")
+:foundparams
+	-> (fmt[:i], fmt[i+1:])
+}
+
+type intparams = struct
+	base	: size
+	padto	: size
+	padfill	: char
+;;
+
+const intparams = {params
+	var ip : intparams
+	var opts
+
+	ip = [
+		.base = 10,
+		.padfill = ' ',
+		.padto = 0
+	]
+
+	opts = parseparams(params, [
+		("x", false),
+		("w", true),
+		("p", true)][:])
+	for o in opts
+		match o
+		| ("x", ""):	ip.base = 16
+		| ("w", wid):	ip.padto = getint(wid, "fmt: width must be integer")
+		| ("p", pad):	ip.padfill = decode(pad)
+		| _:	std.die("unreachable")
+		;;
+	;;
+	iassert(ip.padto >= 0, "pad must be >= 0")
+	std.slfree(opts)
+	-> ip
+}
+
+const strfmt = {sb, str, params
+	var opts
+	var w, p, i, raw
+
+	p = ' '
+	w = 0
+	raw = false
+	opts = parseparams(params, [
+		("w", true),
+		("p", true),
+		("r", false)
+	][:])
+
+	for o in opts
+		match o
+		| ("w", wid):	w = getint(wid, "fmt: width must be integer")
+		| ("p", pad):	p = decode(pad)
+		| ("r", ""):	raw = true
+		| _:	std.die("unreachable")
+		;;
+	;;
+	iassert(p >= 0, "pad must be >= 0")
+	std.slfree(opts)
+	if raw
+		for b in str
+			sbputs(sb, "\\x")
+			intfmt(sb, [.padto=2, .padfill='0', .base=16], false, b)
+		;;
+	else
+		for i = 0; i < w - graphemewidth(str); i++
+			sbputc(sb, p)
+		;;
+		sbputs(sb, str)
+	;;
+}
+
+/*
+Hah. like we're going to put in the work to actually
+count graphemes.
+*/
+const graphemewidth = {str
+	-> str.len
+}
+
+const digitchars = [
+	'0','1','2','3','4',
+	'5','6','7','8','9',
+	'a','b','c','d','e','f'
+]
+generic intfmt = {sb, opts, signed, bits : @a::(integral,numeric)
+	var isneg
+	var val
+	var b : char[32]
+	var i, j, npad
+	var base
+
+	base = opts.base castto(uint64)
+	if signed && bits < 0
+		val = -bits castto(uint64)
+		isneg = true
+	else
+		val = bits castto(uint64)
+		val &= ~0 >> (8*(sizeof(uint64)-sizeof(@a)))
+		isneg = false
+	;;
+
+	i = 0
+	if val == 0
+		b[0] = '0'
+		i++
+	;;
+	while val != 0
+		b[i] = digitchars[val % base]
+		val /= base
+		i++
+	;;
+
+	npad = clamp(opts.padto - i, 0, opts.padto)
+	if isneg
+		npad--
+	;;
+	if opts.padfill == '0' && isneg
+		sbputc(sb, '-')
+	;;
+	for j = 0; j < npad; j++
+		sbputc(sb, opts.padfill)
+	;;
+	if opts.padfill != '0' && isneg
+		sbputc(sb, '-')
+	;;
+	for j = i; j != 0; j--
+		sbputc(sb, b[j - 1])
+	;;
+}
+
+const writeall = {fd, buf
+	var len
+
+	len = 0
+	while true
+		match write(fd, buf[len:])
+		| `Fail err:	break
+		| `Ok n:
+			len += n
+			if n == 0 || len == buf.len
+				break
+			;;
+		;;
+	;;
+	-> len
+}
+
+
+/* would use std.get(), but that's a dependency loop */
+const getint = {s, msg
+	match std.intparse(s)
+	| `Some w:	-> w;
+	| `None:	die(msg)
+	;;
+}

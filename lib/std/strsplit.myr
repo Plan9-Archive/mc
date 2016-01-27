@@ -1,0 +1,61 @@
+use "alloc"
+use "chartype"
+use "die"
+use "extremum"
+use "option"
+use "slpush"
+use "strfind"
+use "types"
+use "utf"
+
+pkg std =
+	const strsplit	: (s : byte[:], delim : byte[:] -> byte[:][:])
+	const strtok	: (s : byte[:] -> byte[:][:])
+;;
+
+extern const put	: (fmt : byte[:], args : ... -> size)
+
+const strsplit = {s, delim
+	var last
+	var sp
+
+	sp = [][:]
+	if s.len == 0
+		-> sp
+	;;
+	last = 0
+	while true
+		match strfind(s, delim)
+		| `Some i:
+			sp = slpush(sp, s[:i])
+			s = s[i + delim.len:]
+		| `None:
+			goto donesplit
+		;;
+	;;
+:donesplit
+	sp = slpush(sp, s[:])
+	-> sp
+}
+
+const strtok = {s
+	var i, j
+	var toks
+
+	i = 0
+	toks = [][:]
+	while i != s.len
+		while isspace(std.decode(s[i:])) && i < s.len
+			i++
+		;;
+		j = i
+		while !std.isspace(std.decode(s[j:])) && j < s.len
+			j++
+		;;
+		if i != j
+			toks = slpush(toks, s[i:j])
+		;;
+		i = j
+	;;
+	-> toks
+}

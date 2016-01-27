@@ -1,0 +1,57 @@
+use sys
+
+use "alloc"
+use "die"
+use "extremum"
+use "fmt"
+use "option"
+use "result"
+use "slcp"
+use "sldup"
+use "sleq"
+use "slpush"
+use "slurp"
+use "cstrconv"
+
+pkg std =
+	const getenv :	(name : byte[:] -> option(byte[:]))
+	const getenvv :	(name : byte[:], default : byte[:] -> byte[:])
+;;
+
+var envkey 	: byte[:][:]
+var envval	: byte[:][:]
+
+const envfind = {key
+	for var i = 0; i < envkey.len; i++
+		if std.sleq(envkey[i], key)
+			-> `Some envval[i]
+		;;
+	;;
+	-> `None
+}
+
+const getenv = {name
+	var buf : byte[128]
+	var s
+
+	match envfind(name)
+	| `Some val:	-> `Some val
+	| `None:
+		s = bfmt(buf[:], "/env/{}", name)
+		match std.slurp(s)
+		| `Fail m: -> `None
+		| `Ok data:
+			data = cstrconv(data)
+			envkey = slpush(envkey, sldup(data))
+			envval = slpush(envval, data)
+			-> `Some data
+		;;
+	;;
+}
+
+const getenvv = {name, default
+	match getenv(name)
+	| `Some val:	-> val
+	| `None:	-> default
+	;;
+}

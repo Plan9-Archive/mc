@@ -1,0 +1,69 @@
+use "die"
+use "execvp"
+use "fmt"
+use "result"
+use "syswrap"
+use "errno"
+
+pkg std =
+	const spork	: (cmd : byte[:][:]	-> result((pid, fd, fd), errno))
+	const sporkfd	: (cmd : byte[:][:], infd : fd, outfd : fd	-> result(pid, errno))
+;;
+
+const spork = {cmd
+	var infds  :fd[2], outfds : fd[2]
+	var err
+
+	/* open up pipes */
+	err = pipe(&infds) 
+	if err != Enone
+		-> `Fail err
+	;;
+	err = pipe(&outfds)
+	if err != Enone
+		-> `Fail err
+	;;
+
+	match sporkfd(cmd, infds[0] castto(fd), outfds[1] castto(fd))
+	| `Ok pid:
+		/* close unused fd ends */
+		close(infds[0]);
+		close(outfds[1]);
+		-> `Ok (pid, infds[1], outfds[0])
+	| `Fail m:
+		-> `Fail m
+	;;
+}
+
+const sporkfd = {cmd, infd, outfd
+	var pid, err
+
+	pid = fork()
+	/* error  */
+	if pid < 0
+		-> `Fail pid castto(errno)
+	/* child */
+	elif pid == 0
+		/* stdin/stdout for our communication. */
+		match dup2(infd castto(fd), 0)
+		| `Ok _:	/* nothing */
+		| `Fail e:	-> `Fail e
+		;;
+		match dup2(outfd castto(fd), 1)
+		| `Ok _:	/* nothing */
+		| `Fail e:	-> `Fail e
+		;;
+		close(infd)
+		close(outfd)
+		err = execvp(cmd[0], cmd)
+		if err != Enone
+			-> `Fail err
+		;;
+		/* if fork succeeds, we never return */
+		die("unreachable")
+	/* parent */
+	else
+		-> `Ok pid
+	;;
+}
+

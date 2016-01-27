@@ -1,0 +1,19 @@
+use std
+use regex
+
+use "testmatch"
+
+const main = {
+	testmatch(".*bæc", "Abæc", `std.Some [][:])
+	testmatch("(\\p{L}*)bæc\\P{L}*", \
+		"Aabæc%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", \
+		`std.Some ["Aa"][:])
+        /* test various syntaxen */
+	testmatch("(\\pL*)bæc\\PL*", \
+		"Aabæc%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", \
+		`std.Some ["Aa"][:])
+	testmatch("(\\p{Letter}*)bæc\\P{Uppercase_Letter}*", \
+		"Aabæc%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", \
+		`std.Some ["Aa"][:])
+	testmatch(".", "æ", `std.Some [][:])
+}

@@ -1,0 +1,7 @@
+sub =
+	mbld
+	lib
+	test
+	bench
+;;
+

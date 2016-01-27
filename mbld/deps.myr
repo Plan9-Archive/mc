@@ -1,0 +1,409 @@
+use std
+use regex
+use bio
+
+use "config"
+use "opts"
+use "types"
+use "util"
+
+pkg bld =
+	const myrdeps	: (b : build#, mt : myrtarg#, doclean : bool, addsrc : bool -> depgraph#)
+;;
+
+const Abiversion = 10
+
+var usepat	: regex.regex#
+var cflagpat	: regex.regex#
+var clibpat	: regex.regex#
+
+const __init__ = {
+	usepat = std.try(regex.compile("^\\s*use\\s+((\\<\\S+\\>)|\"(\\S+)\").*"))
+	cflagpat = std.try(regex.compile("/\\*\\s*CFLAGS:\\s*(.*)\\s*\\*/"))
+	clibpat = std.try(regex.compile("/\\*\\s*LIBS:\\s*(.*)\\s*\\*/"))
+}
+
+
+type dep = union
+	`Local	(byte[:], int)
+	`Lib	(byte[:], int)
+;;
+
+type depscan = struct
+	doclean	: bool
+	addsrc	: bool
+	tagsel	: std.htab(byte[:], byte[:])#
+	targ	: myrtarg#
+	incs	: byte[:][:]
+	depstk	: byte[:][:]
+;;
+
+const myrdeps = {b, mt, doclean, addsrc
+	var objs, uses, srcs
+	var cflags, libs 
+	var out, useout
+	var dg : depgraph#
+	var ds : depscan
+	var i
+
+	dg = std.mk([
+		.deps = std.mkht(std.strhash, std.streq),
+		.libs = std.mkht(std.strhash, std.streq),
+		.input = std.mkht(std.strhash, std.streq),
+		.sources = std.mkht(std.strhash, std.streq),
+		.updated = std.mkht(std.strhash, std.streq),
+		.seen = std.mkht(std.strhash, std.streq),
+		.done = std.mkht(std.strhash, std.streq),
+		.cflags = std.mkht(std.strhash, std.streq),
+		.extlibs = [][:],
+		.dynamic = false,
+	])
+	/* direct dependencies of binary */
+	if mt.islib
+		out = std.fmt("lib{}.a", mt.name)
+		useout = std.sldup(mt.name)
+	else
+		out = std.sldup(mt.name)
+		useout = ""
+	;;
+
+	ds = [
+		.doclean = doclean,
+		.addsrc = addsrc,
+		.incs = mt.incpath,
+		.targ = mt,
+		.depstk = [][:],
+	]
+	srcs = mt.inputs
+	objs = swapall(srcs, config.Objsuffix)
+	uses = swapall(srcs, ".use")
+	for i = 0; i < srcs.len; i++
+		std.htput(dg.input, objs[i], srcs[i])
+		std.htput(dg.sources, srcs[i], true)
+		pushdep(dg, srcs[i], objs[i])
+		if std.hassuffix(srcs[i], ".myr")
+			std.htput(dg.input, uses[i], srcs[i])
+			pushdep(dg, srcs[i], uses[i])
+		elif std.hassuffix(srcs[i], ".glue.c")
+			(cflags, libs) = scrapecflags(b, dg, srcs[i])
+			std.htput(dg.cflags, srcs[i], cflags)
+			dg.extlibs = std.sljoin(dg.extlibs, libs)
+			dg.dynamic = true
+		;;
+	;;
+
+	for i = 0; i < srcs.len; i++
+		pushdep(dg, objs[i], out)
+		if !std.hassuffix(srcs[i], ".myr")
+			continue
+		;;
+		if mt.islib
+			pushdep(dg, uses[i], useout)
+		;;
+		srcdeps(b, &ds, dg, srcs[i], objs[i], uses[i])
+	;;
+
+	dumpgraph(dg)
+	-> dg
+}
+
+const swapall = {srcs, suff
+	var sl
+
+	sl = [][:]
+	for s in srcs
+		sl = std.slpush(sl, srcswapsuffix(s, suff))
+	;;
+	-> sl
+}
+
+const dumpgraph = {dg
+	var keys
+
+	if !opt_debug
+		-> void
+	;;
+	keys = std.htkeys(dg.deps)
+	std.put("digraph dg {{\n")
+	for k in keys
+		for v in std.htgetv(dg.deps, k, ["WTFUNKNOWN!"][:])
+			std.put("\t\"{}\" -> \"{}\";\n", k, v)
+		;;
+	;;
+	std.put("}\n")
+}
+
+const srcdeps = {b, ds, g, path, obj, usefile
+	var deps
+
+	if std.hthas(g.done, path)
+		-> void
+	;;
+
+	ds.depstk = std.slpush(ds.depstk, path)
+	if std.htgetv(g.seen, path, false)
+		std.fput(1, "dependency loop involving {}:\n", path)
+		for d in ds.depstk
+			std.fput(1, "\t{}\n", d)
+		;;
+		std.exit(1)
+	;;
+	deps = getdeps(b, ds, path)
+	std.htput(g.seen, path, true)
+	for d in deps
+		match d
+		| `Lib (lib, lnum):
+			/*
+			If we're cleaning, we don't care about libraries; at best, this does nothing. At
+			worst, this will cause failure if the library is a local library that gets cleand.
+			*/
+			if !ds.doclean
+				scrapelibs(g, lib, ds.incs)
+			;;
+		| `Local (l, lnum):
+			if !std.hassuffix(l, ".use")
+				l = std.sljoin(l, ".use")
+			;;
+			if obj.len != 0
+				pushdep(g, l, obj)
+			;;
+			if usefile.len != 0
+				pushdep(g, l, usefile)
+			;;
+			addusedep(b, ds, g, path, l, lnum)
+		;;
+	;;
+	ds.depstk = std.slgrow(ds.depstk, ds.depstk.len - 1)
+	std.htput(g.seen, path, false)
+	std.htput(g.done, path, true)
+}
+
+const addusedep = {b, ds, g, f, usefile, line
+	var src
+
+	if std.hthas(g.done, usefile)
+		if opt_debug
+			std.put("already loaded deps for {}\n", usefile)
+		;;
+		-> void
+	;;
+	match std.htget(g.input, usefile)
+	| `std.Some path:
+		src = std.sldup(path)
+	| `std.None:
+		src = swapsuffix(usefile, ".use", ".myr")
+		if ds.addsrc
+			std.htput(g.sources, src, true)
+		elif !std.hthas(g.input, usefile)
+			std.fatal("{}:{}: source file {} not listed in bldfile\n", f, line, src)
+		;;
+	;;
+	pushdep(g, src, usefile)
+	std.htput(g.input, usefile, src)
+	srcdeps(b, ds, g, src, "", usefile)
+	std.htput(g.done, usefile, true)
+}
+
+const scrapecflags = {b, ds, path
+	var cflags, libs, lnum
+	var f
+
+	lnum = 0
+	cflags = [][:]
+	libs = [][:]
+	f = opensrc(b, path)
+	while true
+		lnum++
+		match bio.readln(f)
+		| `bio.Err e:	std.fatal("unable to read {}: {}\n", path, e)
+		| `bio.Eof:	break
+		| `bio.Ok ln:
+			(cflags, libs) = getcflags(ln, cflags, libs)
+			std.slfree(ln)
+		;;
+	;;
+	bio.close(f)
+	-> (cflags, libs)
+}
+
+const getcflags = {ln, cflags, libs
+	var flags
+
+	match regex.exec(cflagpat, ln)
+	| `std.None:
+	| `std.Some m:
+		flags = std.strtok(m[1])
+		for fl in flags
+			cflags = std.slpush(cflags, std.sldup(fl))
+		;;
+		std.slfree(flags)
+		regex.matchfree(m)
+	;;
+
+	match regex.exec(clibpat, ln)
+	| `std.None:
+	| `std.Some m:
+		flags = std.strtok(m[1])
+		for fl in flags
+			libs = std.slpush(libs, std.sldup(fl))
+		;;
+		std.slfree(flags)
+		regex.matchfree(m)
+	;;
+	-> (cflags, libs)
+}
+
+const getdeps = {b, ds, path
+	var deps, lnum
+	var f
+
+	lnum = 0
+	deps = [][:]
+	f = opensrc(b, path)
+	while true
+		lnum++
+		match bio.readln(f)
+		| `bio.Err e:	std.fatal("unable to read {}: {}\n", path, e)
+		| `bio.Eof:	break
+		| `bio.Ok ln:
+			deps = depname(deps, ln, lnum)
+			std.slfree(ln)
+		;;
+	;;
+	bio.close(f)
+	-> deps
+}
+
+const opensrc = {b, path
+	if !std.fexists(path)
+		match std.htget(b.gensrc, path)
+		| `std.Some gt:	run(gt.cmd)
+		| `std.None:	std.fatal("no input file {}\n", path)
+		;;
+	;;
+
+	match bio.open(path, bio.Rd)
+	| `std.Fail m:	std.fatal("could not open {}: {}\n", path, m)
+	| `std.Ok f:	-> f
+	;;
+}
+
+const depname = {deps, ln, lnum
+	/*
+	the regex pattern does some contortions to either grab
+	an unquoted path and put it into uses[4], or a quoted
+	path, and put it (minus the quotes) into uses[2]
+	*/
+	match regex.exec(usepat, ln)
+	| `std.Some uses:
+		if uses[2].len > 0
+			deps = std.slpush(deps, `Lib (std.sldup(uses[2]), lnum))
+		else
+			deps = std.slpush(deps, `Local (std.sldup(uses[3]), lnum))
+		;;
+		regex.matchfree(uses)
+	| `std.None:
+		/* nothing to do */
+	;;
+	-> deps
+}
+
+const scrapelibs = {dg, lib, incs
+	var deps, d
+	var f
+	var done
+
+	if std.hthas(dg.libs, lib)
+		-> void
+	;;
+
+	f = openlib(lib, incs)
+	match bio.getc(f)
+	| `bio.Ok 'U': /* nothing */
+	| `bio.Ok _:	std.fatal("library {}: corrupt or invalid usefile\n", lib)
+	| `bio.Err e:	std.fatal("library {}: could not read usefile: {}\n", lib, e)
+	| `bio.Eof:	std.fatal("library {}: could not read usefile\n", lib)
+	;;
+	match bio.getbe32(f)
+	| `bio.Ok Abiversion:	/* nothing: version matches. */
+	| `bio.Ok v:	
+		if v < Abiversion
+			std.fput(1, "library {}: warning: old abi version {}\n", lib, v)
+		else
+			std.fput(1, "library {}: usefile version {} unknown\n", lib, v)
+		;;
+	| `bio.Err e:	std.fatal("library {}: error reading usefile: {}\n", lib, e)
+	| `bio.Eof:	std.fatal("library {}: corrupt or truncated usefile\n", lib)
+	;;
+	std.slfree(rdstr(f))
+
+	done = false
+	deps = [][:]
+	while !done
+		match bio.getc(f)
+		| `bio.Ok 'L':
+			d = rdstr(f)
+			deps = std.slpush(deps, d)
+		| `bio.Ok 'X':
+			d = rdstr(f)
+			dg.extlibs = std.slpush(dg.extlibs, d)
+		| `bio.Ok _:	done = true
+		| `bio.Eof:	done = true
+		| `bio.Err e:	std.fatal("io error reading {}: {}", lib, e)
+		;;
+	;;
+	bio.close(f)
+	std.htput(dg.libs, lib, deps)
+	for dep in deps
+		scrapelibs(dg, dep, incs)
+	;;
+}
+
+const openlib = {lib, incs
+	var path
+
+	for p in incs
+		path = std.pathjoin([p, lib][:])
+		match  bio.open(path, bio.Rd)
+		| `std.Ok file:	-> file
+		| `std.Fail m:	/* nothing */
+		;;
+	;;
+	path = std.pathjoin([opt_instbase, config.Libpath, lib][:])
+	match  bio.open(path, bio.Rd)
+	| `std.Ok file:	-> file
+	| `std.Fail m:	/* nothing */
+	;;
+	std.put("could not find library {} in search path:\n", lib)
+	for p in incs
+		std.put("\t{}\n", p)
+	;;
+	std.fatal("\t{}\n", config.Libpath)
+}
+
+/* pushes a dep into the dependency list */
+const pushdep = {dg, src, dst
+	var sl
+
+	if opt_debug
+		std.put("{} <= {}\n", dst, src)
+	;;
+	sl = std.htgetv(dg.deps, dst, [][:])
+	sl = std.slpush(sl, src)
+	std.htput(dg.deps, dst, sl)
+}
+
+const rdstr = {f
+	var len
+	var sl
+
+	match bio.getbe32(f)
+	| `bio.Ok l:
+		len = l
+		sl = std.slalloc(len)
+	| `bio.Eof:	std.fatal("end of file while reading string")
+	| `bio.Err e:	std.fatal("error while reading string: {}", e)
+	;;
+	bio.read(f, sl)
+	-> sl
+}

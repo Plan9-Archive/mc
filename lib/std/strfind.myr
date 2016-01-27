@@ -1,0 +1,51 @@
+use "types"
+use "option"
+
+pkg std =
+	const strfind	: (haystack : byte[:], needle : byte[:] -> option(size))
+	const strrfind	: (haystack : byte[:], needle : byte[:] -> option(size))
+	const strhas	: (haystack : byte[:], needle : byte[:]	-> bool)
+;;
+
+const strfind = {haystack, needle
+	-> strfindin(haystack, needle, 0, haystack.len)
+}
+
+const strrfind = {haystack, needle
+	-> strfindin(haystack, needle, haystack.len - 1, -1)
+}
+
+const strfindin = {haystack, needle, start, end
+	var inc : size
+
+	inc = 1
+	if start > end
+		inc = -1
+	;;
+	for var i = start; i != end; i += inc
+		/* 
+		if we knew the direction we could terminate early,
+		but we allow the start and end to be passed in.
+		*/
+		if i + needle.len > haystack.len
+			continue
+		;;
+		if haystack[i] == needle[0]
+			for var j = 0; j < needle.len; j++
+				if haystack[i + j] != needle[j]
+					goto nextiter
+				;;
+			;;
+			-> `Some i
+		;;
+:nextiter
+	;;
+	-> `None
+}
+
+const strhas = {haystack, needle
+	match strfind(haystack, needle)
+	| `Some _:	-> true
+	| `None:	-> false
+	;;
+}
