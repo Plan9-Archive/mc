@@ -1,0 +1,21 @@
+use "syswrap"
+use "errno"
+
+pkg std =
+	const mkpath	: (p : byte[:], mode : int64 -> errno)
+;;
+
+const mkpath = {p, mode
+	var st
+
+	for var i = 0; i < p.len; i++
+		if p[i] == '/' castto(byte) && i != 0
+			st = mkdir(p[:i], mode)
+			if st != 0 && st != Eexist
+				-> st
+			;;
+		;;
+	;;
+
+	-> Enone
+}

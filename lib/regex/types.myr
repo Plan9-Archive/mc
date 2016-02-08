@@ -1,0 +1,88 @@
+use std
+
+pkg regex =
+	type status = union
+		`Noimpl
+		`Incomplete
+		`Unbalanced char
+		`Emptyparen
+		`Badrep char
+		`Badrange byte[:]
+		`Badescape char
+	;;
+
+	type ast = union
+		/* basic string building */
+		`Alt	(ast#, ast#)
+		`Cat	(ast#, ast#)
+
+		/* repetition */
+		`Star	ast#
+		`Rstar  ast#
+		`Plus	ast#
+		`Rplus	ast#
+		`Quest	ast#	
+
+		/* end matches */
+		`Chr	char
+		`Ranges	char[2][:]
+
+		/* meta */
+		`Cap	(std.size, ast#) /* id, ast */
+		`Bol	/* beginning of line */
+		`Eol	/* end of line */
+		`Bow	/* beginning of word */
+		`Eow	/* end of word */
+	;;
+
+
+	type regex = struct
+		/* compile state */
+		debug	: bool
+		pat	: byte[:]
+		nmatch	: std.size
+
+		/* VM state */
+		runq	: rethread#
+		expired	: rethread#
+		expiredtail	: rethread#
+		proglen	: std.size
+		prog	: reinst[:]
+		nthr	: std.size
+		str	: byte[:]
+		strp	: std.size
+	;;
+
+	pkglocal type rethread = struct
+		next	: rethread#	/* run queue link */
+
+		tid	: std.size	/* just for debugging */
+		ip	: std.size	/* the instruction pointer */
+		dead	: bool		/* thread died */
+		matched	: bool		/* thread matched */
+
+		mstart	: std.size[:]	/* match starts */
+		mend	: std.size[:]	/* match ends */
+	;;
+
+	pkglocal type reinst = union
+		/* direct consumers */
+		`Ibyte	byte
+		`Irange	(byte, byte)
+
+		/* groups */
+		`Ilbra	std.size
+		`Irbra	std.size
+
+		/* anchors */
+		`Ibol
+		`Ieol
+		`Ibow
+		`Ieow
+
+		/* control flow */
+		`Ifork	(std.size, std.size)
+		`Ijmp	std.size
+		`Imatch	std.size
+	;;
+;;

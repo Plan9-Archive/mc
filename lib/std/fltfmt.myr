@@ -1,0 +1,243 @@
+use "alloc"
+use "bigint"
+use "die"
+use "extremum"
+use "fltbits"
+use "slpush"
+use "strbuf"
+use "types"
+use "utf"
+use "memops"
+
+pkg std =
+	pkglocal const MNormal = 0
+	pkglocal const MAbsolute = 1
+	pkglocal const MRelative = 2
+
+	pkglocal const flt64bfmt	: (sb : strbuf#, val : flt64, mode : int, precision : int -> void)
+	pkglocal const flt32bfmt	: (sb : strbuf#, val : flt32, mode : int, precision : int -> void)
+;;
+
+const Dblbias = 1023
+const Fltbias = 127
+
+const flt64bfmt = {sb, val, mode, precision
+	var isneg, exp, mant
+
+	(isneg, mant, exp) = flt64explode(val)
+	dragon4(sb, isneg, mant, (exp - 52) castto(int64), Dblbias, mode, precision)
+}
+
+const flt32bfmt = {sb, val, mode, precision
+	var isneg, exp, mant
+
+	(isneg, mant, exp) = flt32explode(val)
+	dragon4(sb, isneg, mant castto(int64), (exp - 52) castto(int64), Fltbias, mode, precision)
+}
+
+/*
+sb: output buffer
+e: exponent
+p: precision
+f: mantissa
+
+flting value: x = f^(e - p)
+*/
+const dragon4 = {sb, isneg, f, e, p, mode, cutoff
+	var r, s, t, u, v, y
+	var udig
+	var mm, mp	/* margins above and below */
+	var roundup
+	var low, high
+	var k, n
+	var a, i
+
+	/* if we have zero for the mantissa, we can return early */
+	n = 0
+	if isneg
+		sbputs(sb, "-")
+	;;
+	if f == 0
+		sbputs(sb, "0.0")
+	;;
+
+	/* initialize */
+	roundup = false
+	r = mkbigint(f)
+	r = bigshli(r, max(e - p, 0))
+	s = bigshli(mkbigint(1), max(0, -(e - p)))
+	mm = bigshli(mkbigint(1), max((e - p), 0))
+	mp = bigdup(mm)
+	u = mkbigint(0)
+
+	/* fixup: unequal gaps */
+	t = mkbigint(1)
+	bigshli(t, p - 1)
+	if bigeqi(t, f)
+		bigshli(mp, 1)
+		bigshli(r, 1)
+		bigshli(s, 1)
+	;;
+	bigfree(t)
+
+	k = 0
+	while true
+		/* r < ceil(s/b) */
+		t = bigdup(s)
+		bigaddi(t, 9)
+		bigdivi(t, 10)
+		match bigcmp(r, t)
+		| `Before:
+			k--
+			bigmuli(r, 10)
+			bigmuli(mm, 10)
+			bigmuli(mp, 10)
+		| _:
+			bigfree(t)
+			break
+		;;
+		bigfree(t)
+	;;
+
+	while true
+		t = bigdup(r)
+		bigshli(t, 1)
+		bigadd(t, mp)
+		while true
+			u = bigdup(s)
+			bigshli(u, 1)
+			match bigcmp(t, u)
+			| `Before:
+				bigfree(u)
+				break
+			| _:
+				k++
+				bigmuli(s, 10)
+				bigfree(u)
+			;;
+		;;
+		if mode == MNormal
+			cutoff = k
+		else
+			if mode == MRelative
+				cutoff += k - 1
+			;;
+			/* common between relative and absolute */
+			a = cutoff - k - 1
+			y = bigdup(s)
+			if a < 0
+				for i = 0; i < a; i++
+					bigmuli(y, 10)
+				;;
+			else
+				for i = 0; i < -a; i++
+					bigaddi(y, 9)
+					bigdivi(y, 10)
+				;;
+			;;
+			match bigcmp(y, mm)
+			| `Before:	/* nothing */
+			| _:
+				bigfree(mm)
+				mm = y
+			;;
+			match bigcmp(y, mp)
+			| `Before:	/* nothing */
+			| _:
+				bigfree(mp)
+				mp = y
+				roundup = true
+			;;
+		;;
+		u = bigdup(s)
+		bigshli(u, 1)
+		match bigcmp(t, u)
+		| `Before:
+			bigfree(t)
+			bigfree(u)
+			break
+		| _:
+		;;
+	;;
+
+	if k <= 0
+		sbputs(sb, "0.")
+		for var i = 0; i < -k; i++
+			sbputs(sb, "0")
+		;;
+	;;
+	while true
+		k--
+
+		bigmuli(r, 10)
+		u = bigdup(r);
+		bigdiv(u, s)
+
+		bigmod(r, s)
+		bigmuli(mm, 10)
+		bigmuli(mp, 10)
+
+		low = false
+		t = bigdup(r)
+		bigshli(t, 1)
+		match bigcmp(t, mm)
+		| `Before:	low = true
+		| _:
+		;;
+		bigfree(t)
+
+		/* v = 2*r */
+		v = bigdup(r)
+		bigshli(v, 1)
+
+		/* t = 2*s - mp */
+		t = bigdup(s)
+		bigshli(t, 1)
+		bigsub(t, mp)
+
+		match bigcmp(v, t)
+		| `Before: high = false;
+		| `Equal: high = roundup;
+		| `After: high = true;
+		;;
+		bigfree(v)
+		bigfree(t)
+		if low || high || k == cutoff
+			break
+		;;
+		format(sb, lowdig(u), k)
+		bigfree(u)
+	;;
+
+	/* format the last digit */
+	udig = lowdig(u)
+	if low && !high
+		format(sb, udig, k)
+	elif high && !low
+		format(sb, udig + 1, k)
+	else
+		bigmuli(r, 2)
+		match bigcmp(r, s)
+		| `Before:	format(sb, udig, k)
+		| `Equal:	format(sb, udig, k)
+		| `After:	format(sb, udig + 1, k)
+		;;
+	;;
+	-> n
+}
+
+const lowdig = {u
+	if u.dig.len > 0
+		-> u.dig[0]
+	;;
+	-> 0
+}
+
+const format = {sb, d, k
+	const dig = "0123456789"
+
+	sbputb(sb, dig[d])
+	if k == 0
+		sbputs(sb, ".")
+	;;
+}
