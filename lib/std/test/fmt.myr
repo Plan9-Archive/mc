@@ -1,0 +1,151 @@
+use std
+
+pkg =
+	type blah
+	type blah = struct
+		a : byte[:]
+		b : int
+	;;
+	type u = union
+		`First
+		`Second int
+		`Third byte[:]
+	;;
+	type pair = struct
+		x : int16
+		y : int32
+	;;
+;;
+
+const check = {expected, fmt, args : ...
+	var buf : byte[2048]
+	var sl, ap
+
+	ap = std.vastart(&args)
+	sl = std.bfmtv(buf[:], fmt, &ap)
+	if !std.sleq(expected, sl)
+		std.fatal("mismatched fmt: got \"{}\", expected \"{}\"\n", sl, expected)
+	;;
+}
+
+
+const main = {
+	builtins()
+	installed()
+}
+
+const builtins = {
+	var s : blah
+	var m : u
+
+	/* basic types */
+	check("      abcd", "{w=10}", "abcd")
+	check("00000bdcae", "{p=0,w=10}", "bdcae")
+	check("abcdefghijkl", "{p=0,w=10}", "abcdefghijkl")
+	check("a", "{w=0,p=1}", "a")
+	check("        10", "{w=10}", 10)
+	check("0000000010", "{p=0,w=10}", 10)
+	check("4294967295", "{p=0,w=10}", -1 castto(uint))
+	check("-000000001", "{p=0,w=10}", -1)
+	check("xxxxxxxx-1", "{p=x,w=10}", -1)
+	check("        -1", "{w=10}", -1)
+	check("100000"    , "{w=3}", 100000)
+	check("foobarbaz", "{}bar{}", "foo", "baz")
+	check("\\x0a\\x0d\\xff", "{e}", "\n\r\xff")
+	check("{}barbaz", "{{}}bar{}", "baz")
+	check("{barbaz}", "{{bar{}}}", "baz")
+	check("abcd", "{}", "abcd")
+	check("123", "{}", 123)
+	check("7b", "{x}", 123)
+	check("0x7b", "0x{x}", 123)
+	check("0.3", "{}", 0.3)
+	check("666.91972", "{}", 666.91972)
+	check("1.0001", "{}", 1.0001)
+	check("0.000101323461002", "{}", 0.000101323461002)
+
+	/* 
+	compound types, followed by single value to make
+	sure we consume the right byte count.
+	*/
+	check("(1, 2) true", "{} {}", (1, 2), true)
+	check("(1,) true", "{} {}", (1,), true)
+
+	s = [.a="foo true", .b=123]
+	/*check("[.a=foo, .b=123] true", "{} {}", s, true) BUSTED */
+
+	m = `First
+	check("`First  true", "{} {}", m, true)
+	m = `Second 123
+	check("`Second 123 true", "{} {}", m, true)
+	m = `Third "foo"
+	check("`Third foo true", "{} {}", m, true)
+
+	check("[1, 2, 3] true", "{} {}", [1,2,3], true)
+	check("[1, 2, 3] true", "{} {}", [1,2,3][:], true)
+}
+
+const installed = {
+	var x : int
+	var p : pair
+
+	x = 0
+	p = [.x=0, .y=0]
+	std.fmtinstall(std.typeof(x), intfmt, [][:])
+	std.fmtinstall(std.typeof(p), pairfmt, [
+		("x", true),
+		("y", false)
+	][:])
+
+	/* single value */
+	check("formatted an int: 0", "{}", 0)
+	check("formatted an int: -10", "{}", -10)
+
+	/* multiple values */
+	check("formatted an int: 0, formatted an int: 10", "{}, {}", 0, 10)
+	check("formatted an int: -10, formatted an int: 20", "{}, {}", -10, 20)
+
+	/* single value, no options */
+	p = [.x=0, .y=0]
+	check("formatted a pair: [0, 0]", "{}", p)
+	/* single value, option combos */
+	p = [.x=-10, .y=-10]
+	check("formatted a pair: [-10, -10]", "{}", p)
+	check("formatted a pair: [-10, -10] x=foo", "{x=foo}", p)
+	check("formatted a pair: [-10, -10] y present", "{y}", p)
+	check("formatted a pair: [-10, -10] x=bar y present", "{x=bar,y}", p)
+	check("formatted a pair: [-10, -10] x=bar y present", "{x=bar,y}", p)
+
+	/* multiple values */
+	check("formatted a pair: [-10, -10], formatted a pair: [-10, -10]", "{}, {}", p, p)
+	/* multiple values of different types */
+	check("11, formatted a pair: [-10, -10], formatted an int: 111", "{}, {}, {}", 11 castto(byte), p, 111)
+
+	/* in aggregates */
+	check("[formatted a pair: [-10, -10]]", "{}", [p])
+	check("[formatted a pair: [-10, -10]]", "{}", [p][:])
+
+}
+
+const intfmt = {sb, ap, opts
+	var x : int
+
+	std.assert(opts.len == 0, "options passed where none should be")
+	x = std.vanext(ap)
+	/* cast to other int type so we don't recurse */
+	std.sbfmt(sb, "formatted an int: {}", x castto(int32))
+}
+
+const pairfmt = {sb, ap, opts
+	var x : pair
+
+	x = std.vanext(ap)
+	std.sbfmt(sb, "formatted a pair: [{}, {}]", x.x, x.y)
+	for opt in opts
+		std.sbputc(sb, ' ')
+		match opt
+		| ("x", val):	std.sbfmt(sb, "x={}", val)
+		| ("y", ""):	std.sbfmt(sb, "y present")
+		| _:	std.fatal("unknown option")
+		;;
+	;;
+}

@@ -1,0 +1,108 @@
+use std
+
+use "config"
+use "deps"
+use "opts"
+use "parse"
+use "types"
+use "util"
+use "build"
+
+pkg bld =
+	const install	: (p : build#	-> bool)
+	const uninstall	: (p : build#	-> bool)
+;;
+
+const install = {b
+	buildall(b)
+	-> movetargs(b, false)
+}
+
+const uninstall = {b
+	-> movetargs(b, true)
+}
+
+const movetargs = {b, rm
+	var libarchive
+	var pfx
+
+	for tn in b.all
+		match gettarg(b.targs, tn)
+		| `Bin bt:
+			if bt.install && !bt.istest
+				movefile(b, rm, bt.dir, bt.name, config.Binpath, 0o755)
+			;;
+		| `Lib lt:
+			if lt.install && !lt.istest
+				movefile(b, rm, lt.dir, lt.name, config.Libpath, 0o644)
+				libarchive = std.fmt("lib{}.a", lt.name)
+				movefile(b, rm, lt.dir, libarchive, config.Libpath, 0o644)
+				std.slfree(libarchive)
+			;;
+		| `Data dt:
+			for blob in dt.blobs
+				if dt.path.len == 0
+					pfx = std.pathcat(config.Sharepath, dt.name)
+					movefile(b, rm, dt.dir, blob, pfx, 0o644)
+					std.slfree(pfx)
+				else
+					movefile(b, rm, dt.dir, blob, dt.path, 0o644)
+				;;
+			;;
+		| `Gen gt:
+			/* nothing to do */
+		| `Cmd ct:
+			/* nothing to do */
+		| `Man mt:
+			/* FIXME: figure out man section by number */
+			for m in mt.pages
+				moveman(b, rm, mt.dir, m)
+			;;
+		;;
+	;;
+	-> true
+}
+
+
+const movefile = {b, rm, dir, file, prefix, perm
+	var path
+
+	setdir(b, dir)
+	path = std.pathjoin([opt_destdir, opt_instbase, prefix, file][:])
+	if rm
+		std.put("\trm {}\n", path)
+		if !std.remove(path)
+			std.put("\t\tno such file {}\n", file)
+		;;
+	else
+		std.put("\t{} => {}\n", file, path)
+		std.remove(path)
+		match std.slurp(file)
+		| `std.Fail m:	std.fatal("Could not open {} for reading\n", file)
+		| `std.Ok buf:
+			if !std.blat(path, buf, perm)
+				std.put("Could not write {}\n", file)
+			;;
+			std.slfree(buf)
+		;;
+	;;
+	std.slfree(path)
+}
+
+const moveman = {b, rm, dir, man
+	var sect, manrel
+
+	match std.strrfind(man, ".")
+	| `std.None:
+		std.fatal("manpage {} has no section\n", man)
+	| `std.Some s:
+		sect = s + 1
+		if s + 1 == man.len
+			std.fatal("manpage {} missing suffix\n", man)
+		;;
+	;;
+
+	manrel = std.fmt("{}{}", opt_manpath, man[sect:])
+	movefile(b, rm, dir, man, manrel, 0o644)
+	std.slfree(manrel)
+}

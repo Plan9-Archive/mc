@@ -1,0 +1,9 @@
+lib bio = 
+	bio.myr
+	geti.myr
+	puti.myr
+	iter.myr
+
+        lib ../std:std
+        lib ../sys:sys
+;;

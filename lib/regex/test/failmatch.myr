@@ -1,0 +1,7 @@
+use std
+
+use "testmatch"
+
+const main = {
+	testmatch(".*bcd", "Abc", `std.None)
+}

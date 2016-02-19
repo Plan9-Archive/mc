@@ -1,0 +1,5 @@
+use std
+
+const main = {
+	std.put("{}\n", 34359738368 castto(int64))
+}

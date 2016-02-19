@@ -1,0 +1,28 @@
+use sys
+
+use "extremum"
+use "option"
+use "sleq"
+
+pkg std =
+	const getenv :	(name : byte[:] -> option(byte[:]))
+	const getenvv :	(name : byte[:], default : byte[:] -> byte[:])
+;;
+
+const getenv = {name
+	var n
+	for env in sys.__environment
+		n = min(name.len, env.len)
+		if sleq(name, env[:n]) && sleq(env[n:n+1], "=")
+			-> `Some env[n+1:]
+		;;
+	;;
+	-> `None
+}
+
+const getenvv = {name, default
+	match getenv(name)
+	| `Some v:	-> v
+	| `None:	-> default
+	;;
+}

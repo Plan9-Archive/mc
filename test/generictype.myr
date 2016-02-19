@@ -1,0 +1,19 @@
+use std
+
+/* checks that parameterized types work. exits with 0. */
+type option(@a) = union
+	`Some @a::(integral,numeric)
+	`None
+;;
+
+const main = {
+	var v
+
+	v = `Some 123
+	match v
+	| `None:	std.exit(1)
+	| `Some 123:	std.exit(0)
+	| `Some _:	std.die("Impossible match failure\n")
+	;;
+	std.exit(60)
+}
