@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "util.h"
 #include "parse.h"
 #include "mi.h"
 #include "asm.h"
@@ -412,6 +413,7 @@ void gengas(Node *file, char *out)
 		case Nimpl:
 			break;
 		case Ndecl:
+			n = flattenfn(n);
 			simpglobl(n, globls, &fn, &nfn, &blob, &nblob);
 			break;
 		default:
