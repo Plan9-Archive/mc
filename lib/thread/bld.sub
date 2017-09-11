@@ -1,0 +1,58 @@
+lib thread =
+	common.myr
+	hookstd.myr	# install thread hooks
+	mutex.myr	# fallback, for unimplemented platforms
+
+	#generic fallbacks
+	ncpu.myr
+
+	# linux impl of basic thread primitives
+	#condvar+linux.myr
+	mutex+linux.myr
+	spawn+linux.myr
+	exit+linux-x64.s
+
+	# freebsd impl of thread primitives
+	#condvar+freebsd.myr
+	mutex+freebsd.myr
+	spawn+freebsd.myr
+	ncpu+freebsd.myr
+	exit+freebsd-x64.s
+
+	# netbsd impl of thread primitives
+	#condvar+netbsd.myr
+	#mutex+netbsd.myr
+	spawn+netbsd.myr
+	#ncpu+netbsd.myr
+	#exit+netbsd-x64.s
+
+	# osx impl of thread primitives
+	#condvar+osx.myr
+	spawn+osx.myr
+	start+osx-x64.s
+
+	# 9front impl of thread primitives
+	#condvar+plan9.myr
+	mutex+plan9.myr
+	spawn+plan9.myr
+	ncpu+plan9.myr
+	atomic-impl+plan9-x64.s
+
+	# openbsd impl of thread primitives
+	spawn+openbsd.myr
+	exit+openbsd-x64.s
+
+	atomic-impl+x64.s
+	atomic.myr
+
+        lib ../sys:sys
+        lib ../std:std
+;;
+
+lib thrtestutil {noinst} =
+	util.myr
+
+        lib ../sys:sys
+        lib ../std:std
+        lib thread
+;;

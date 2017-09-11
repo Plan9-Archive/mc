@@ -1,0 +1,14 @@
+use std
+
+pkg inifile =
+	type error = union
+		`Fileerr
+		`Parseerr int
+		`Dupkey int
+	;;
+
+	type inifile = struct
+		sects	: byte[:][:]
+		elts	: std.htab((byte[:], byte[:]), byte[:])#
+	;;
+;;

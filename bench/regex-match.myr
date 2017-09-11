@@ -1,0 +1,36 @@
+use std
+use regex
+use testr
+
+var str
+var dotstar, hello
+
+const main = {
+	str = std.sldup("hello world!")
+	str = std.strcat(str, str)
+	str = std.strcat(str, str)
+	str = std.strcat(str, str)
+	str = std.strcat(str, str)
+
+	dotstar = std.try(regex.compile(".*"))
+	hello = std.try(regex.compile("hel*o"))
+
+	testr.bench([
+		[.name="matchall", .fn=matchall],
+		[.name="searchhello", .fn=searchhello],
+	][:])
+}
+
+const matchall = {ctx
+	match regex.exec(dotstar, str)
+	| `std.Some m:	regex.matchfree(m)
+	| `std.None:	std.fatal("Didn't match regex\n")
+	;;
+}
+
+const searchhello = {ctx
+	match regex.search(dotstar, str)
+	| `std.Some m:	regex.matchfree(m)
+	| `std.None:	std.fatal("Didn't match regex\n")
+	;;
+}

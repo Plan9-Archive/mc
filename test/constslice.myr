@@ -1,0 +1,22 @@
+use std
+
+const slpart = array[1:3]
+const slfull = array[:]
+const slinline = [6,7,8][:]
+const array = [1,2,3,4,5]
+
+const main = {
+	/* expected output 23 */
+	for x : slpart
+		std.put("{}", x)
+	;;
+	/* expected output 12345 */
+	for x : slfull
+		std.put("{}", x)
+	;;
+	/* expected output 678 */
+	for x : slinline
+		std.put("{}", x)
+	;;
+	std.put("\n")
+}
