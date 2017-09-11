@@ -1,0 +1,155 @@
+use std
+
+use "config"
+use "opts"
+use "types"
+use "util"
+
+pkg bld =
+	const buildtarg	: (b : build#, targ : byte[:] -> bool)
+	const clean	: (b : build# -> bool)
+;;
+
+const buildtarg = {b, targ
+	var g, targs
+
+	g = b.deps
+	match std.htget(g.targs, targ)
+	| `std.Some t:	targs = t
+	| `std.None:	std.fatal("unknown target: {}\n", targ)
+	;;
+	for t : targs
+		mark(b, t)
+	;;
+	build(b, g)
+	-> !b.fail
+}
+
+const clean = {b
+	for n : b.deps.nodes
+		if n.durable
+			continue
+		;;
+		for g : n.gen
+			if std.remove(g)
+				mbldput("\tclean {}\n", g)
+			;;
+		;;
+	;;
+	-> true
+}
+
+const mark = {b, o
+	if o.want
+		-> void
+	;;
+
+	o.want = true
+	for n : o.ndep
+		mark(b, n)
+	;;
+}
+
+const build = {b, g
+	for n : g.leaves
+		if n.want
+			/* stale() updates the mtime of the leaf node */
+			stale(b, n)
+			unblock(b, n)
+		;;
+	;;
+
+	while std.htcount(b.proc) != 0 || b.queue.len != 0
+		while std.htcount(b.proc) < opt_maxproc && b.queue.len > 0
+			launch(b, std.slpop(&b.queue))
+		;;
+		wait(b)
+	;;
+}
+
+const launch = {b, n
+	var pid
+
+	if stale(b, n)
+		mkout(n)
+		pid = run(n.cmd, "")
+		std.htput(b.proc, pid, n)
+	else
+		unblock(b, n)
+	;;
+}
+
+const wait = {b
+	var pp : std.pid
+
+	if std.htcount(b.proc) == 0
+		-> void
+	;;
+	match std.waitany()
+	| (p, `std.Wfailure):	fail(b, p, "FAIL")
+	| (p, `std.Wsignalled):	fail(b, p, "CRASH")
+	| (p, `std.Waiterror):	std.fatal("error waiting: nproc={}\n", std.htcount(b.proc))
+	| (p, `std.Wsuccess):
+		pp = p
+		match std.htget(b.proc, p)
+		| `std.None:
+			std.fatal("followed home by stray pid {}\n", p)
+		| `std.Some n:
+			n.mtime = std.now()
+			std.htdel(b.proc, p)
+			unblock(b, n)
+		;;
+	;;
+}
+
+const proclbl = {b, pid
+	match std.htget(b.proc, pid)
+	| `std.Some n:	-> n.cmd
+	| `std.None:	-> std.sldup(["?unknown?"][:])
+	;;
+}
+
+const unblock = {b, n
+	if b.fail
+		-> void
+	;;
+	for g : n.ngen
+		std.assert(g.nblock != 0, "bogus unblock {} from {}\n", g.lbl, n.lbl)
+		g.nblock--
+		if g.nblock == 0 && g.want
+			std.slpush(&b.queue, g)
+		;;
+	;;
+}
+
+const stale = {b, n
+	var staletime
+
+	staletime = 0
+	for d : n.ndep
+		staletime = std.max(staletime, d.mtime)
+	;;
+
+	n.mtime = std.now()
+	for g : n.gen
+		match std.fmtime(g)
+		| `std.Ok tm:	n.mtime = std.min(n.mtime, tm)
+		| `std.Err e:	n.mtime = 0
+		;;
+	;;
+	-> staletime > n.mtime
+}
+
+const mkout = {n
+	for g : n.gen
+		std.mkpath(std.dirname(g))
+	;;
+}
+
+const fail = {b, pid, failtype
+	std.fput(std.Err, "{}: {j= }\n", failtype, proclbl(b, pid))
+	std.htdel(b.proc, pid)
+	std.slfree(b.queue)
+	b.queue = [][:]
+	b.fail = true
+}

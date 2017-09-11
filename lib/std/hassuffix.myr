@@ -1,0 +1,15 @@
+use "sleq"
+pkg std =
+	const hassuffix	: (s : byte[:], suff : byte[:] -> bool)
+;;
+
+const hassuffix = {s, suff
+	var tail
+
+	if suff.len <= s.len
+		tail = s[s.len - suff.len:]
+		-> sleq(tail, suff)
+	;;
+	-> false
+}
+

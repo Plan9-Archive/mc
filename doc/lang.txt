@@ -1,0 +1,2071 @@
+                    The Myrddin Programming Language
+                              Jul 2012
+                          Updated Feb 2017
+                            Ori Bernstein
+
+TABLE OF CONTENTS:
+
+    1. ABOUT
+    2. LEXICAL CONVENTIONS
+        2.1. EBNF-ish
+        2.2. As-If Rule
+    3. STRUCTURE:
+        3.1. Whitespace and Keywords
+        3.2. Top Level Structure
+        3.3. Declarations
+        3.4. Packages and Uses
+        3.5. Scoping
+    4. TYPES
+        4.1. Primitive Types
+        4.2. User Defined Types
+        4.3. Generic Types
+        4.4. Traits and Impls
+        4.5. Type Inference
+        4.6. Built in Traits
+    5. VALUES AND EXPRESSIONS
+        5.1. Literal Values
+        5.2. Expressions
+    6. CONTROL FLOW
+        6.1. Blocks
+        6.2. Conditionals
+        6.3. Matches
+        6.4. Looping
+        6.5. Goto
+    7. GRAMMAR
+
+1. ABOUT:
+
+        Myrddin is designed to be a simple programming language.
+        It is designed to provide the programmer with predictable
+        behavior and a pragmatic set of semantics, providing the
+        benefits of strong type checking, generics, type inference,
+        and modern features with a high cost-benefit ratio. Myrddin
+        is not a language designed to explore the forefront of type
+        theory or compiler technology. Its focus is on being a
+        practical, small, well defined, and easy to understand
+        language for work that needs to be close to the hardware.
+
+        Myrddin is influenced strongly by C and ML, with ideas from
+        too many other places to name.
+
+
+2. LEXICAL CONVENTIONS:
+
+    2.1. EBNF-ish:
+
+        Syntax is defined using an informal variant of EBNF (Extended
+        Backus Naur Form).
+
+            token:      /regex/ | "quoted" | <informal description>
+            prod:       prodname ":" expr*
+            expr:       alt ( "|" alt )*
+            alt:        term term*
+            term:       prod | token | group | opt | rep
+            group:      "(" expr ")" .
+            opt:        "[" expr "]" .
+            rep:        zerorep | onerep
+            zerorep:    term "*"
+            onerep:     term "+"
+
+        Whitespace and comments are implicitly stripped out before parsing.
+
+        To put the description in words, /regex/ defines a regular
+        expression that would match a single token in the input. "quoted"
+        would match a single string. <english description> contains an
+        informal description of what characters would match. In the case of
+        ambiguity, longest match wins.  In the case of ambiguity with a
+        quoted string, the quoted string wins.
+
+        Productions are defined by any number of expressions, in which
+        expressions are '|' separated sequences of terms.
+
+        Terms are productions or tokens, and may come with a repeat specifier.
+        wrapping a term in "[]" denotes that the term is repeated 0 or 1
+        times. suffixing it with a '*' denotes 0 or more repetitions, and '+'
+        denotes 1 or more repetitions.
+
+    2.2. As-If Rule:
+
+        Any behavior specified in this document may be treated however the
+        compiler wishes, as long as the result is observed as if the semantics
+        specified were followed strictly.
+
+3. STRUCTURE:
+
+    3.1. Whitespace and Keywords:
+
+        The language is composed of several classes of tokens: comments,
+        identifiers, keywords, punctuation, and whitespace.
+
+        Comments begin with "/*" and end with "*/". This style of comment
+        may nest, meaning that /* and */ still have a meaning within the
+        comment. No other text in this type of comment is interpreted.
+
+            /* this is a comment /* with another inside */ */
+
+        Alternatively, '//' may be used to denote a comment. This comment
+        will extend to the end of the current line. Newlines within a line
+        comment may not be escaped. /* has no special meaning within a //
+        comment.
+
+            // this is a line comment
+            // it will end on this line, regardless of the trailing \
+
+        Identifiers begin with any alphabetic character or underscore, and
+        continue with alphanumeric characters or underscores. The compiler
+        may place a reasonable limit on the length of an identifier. This
+        limit must be at least 256 characters.
+
+            some_id_234__
+
+        Keywords are a special class of identifier that is reserved by the
+        language and given a special meaning. The full set of keywords are
+        listed below. Their meanings will be covered later in this reference
+        manual.
+
+            $noret          _               break
+            const           continue        elif
+            else            extern          false
+            for             generic         goto
+            if              impl            in
+            match           pkg             pkglocal
+            sizeof          struct          trait
+            true            type            union
+            use             var             void
+            while
+
+        Literals are a direct representation of a data object within the
+        source of the program. There are several literals implemented within
+        the language.  These are fully described in section 4.2 of this
+        manual. 
+
+        Single semicolons (';') and newline (\n) characters are synonymous and
+        interchangable. They both are used to mark the end of logical lines,
+        and will be uniformly referred to as line terminators.
+
+    3.2. Top Level Structure:
+
+            file:       (decl | package | use | impldef | traitdef | tydef)*
+
+        A file is composed of a sequence of top level elements. These
+        top level elements consist of:
+
+        - Declarations:
+
+            These define a constant or a variable. It's worth noting
+            that Myrddin has no special syntax for declaring functions,
+            but instead assigns a closure to a variable or constant.
+
+        - Package Definitions:
+
+            These define the list of exported symbols from a file. As
+            part of compilation, all the exported symbols from a package
+            will get merged together from all the files being built
+            into that package.
+
+        - Use Statements:
+
+            These import symbols for use within the file. These symbols
+            come from either installed packages or files within the
+            project being compiled.
+
+        - Type Definitions:
+
+            These define new types.
+
+        - Trait Definitions:
+
+            These define traits. Traits are attributes on types that
+            may be implemented by impl statements. They define a
+            constraint that may be set on types passed to generic
+            functions, and the required functions that must be defined
+            by an impl for a type to satisfy that constraint.
+
+        - Impl Statements:
+
+            These define implementations of traits. Impl statements
+            tag a type as satisfying a trait defined by the constraint,
+            and contain the code needed to implement the requirements
+            imposed by the trait being implemented.
+
+    3.3. Declarations:
+
+            decl:       attrs ("var" | "const" | "generic")  decllist
+            attrs:      ("extern" | "pkglocal" | "$noret")*
+            decllist:   declbody ("," declbody)*
+            declbody:   declcore ["=" expr]
+            declcore:   name [":" type]
+
+        A declaration consists of a declaration class (i.e., one of 'const',
+        'var', or 'generic'), followed by a declaration name, optionally
+        followed by a type and assignment. It is noteworthy that, unlike most
+        languages, there is no function declaration syntax. Instead, a
+        function is declared like any other symbol: by assigning a function
+        value to a symbol.
+
+            const:      Declares a constant value, which may not be
+                        modified at run time. Constants must have
+                        initializers defined.
+
+            var:        Declares a variable value. This value may be
+                        assigned to, copied from, and modified.
+
+            generic:    Declares a specializable value. This value
+                        has the same restrictions as a const, but
+                        taking its address is not defined. The type
+                        parameters for a generic must be explicitly
+                        named in the declaration in order for their
+                        substitution to be allowed.
+
+        In addition, declarations may accept a number of modifiers which
+        change the attributes of the declarations:
+
+            extern:     Declares a variable as having external linkage.
+                        Assigning a definition to this variable within the
+                        file that contains the extern definition is an error.
+
+            pkglocal:   Declares a variable which is local to the package.
+                        This variable may be used from other files that
+                        declare the same `pkg` namespace, but referring to
+                        it from outside the namespace is an error.
+
+            $noret:     Declares the function to which this is applied as
+                        a non-returning function. This attribute is only
+                        valid when applied to a function.
+
+        The 
+        Examples:
+
+            Declare a constant with a value 123. The type is not defined,
+            and will be inferred:
+
+                const x = 123
+
+            Declare a variable with no value and no type defined. The
+            value can be assigned later (and must be assigned before use),
+            and the type will be inferred.
+
+                var y
+
+            Declare a generic with type '@a', and assigns it the value
+            'blah'. Every place that 'z' is used, it will be specialized,
+            and the type parameter '@a' will be substituted.
+
+                generic z : @a = blah
+
+            Declare a function f with and without type inference. Both
+            forms are equivalent. 'f' takes two parameters, both of type
+            int, and returns their sum as an int
+
+                const f = {a, b
+                    var c : int = 42
+                    -> a + b + c
+                }
+
+                const f : (a : int, b : int -> int) = {a : int, b : int -> int
+                    var c : int  = 42
+                    -> a + b + c
+                }
+
+
+    3.4. Packages and Uses
+
+            package:        "pkg" ident = decl* ";;"
+            use:            bareuse | quoteuse
+            bareuse:        use ident
+            quoteuse:       use "<quoted string>"
+
+
+        There are two keywords for module system. 'use' is the simpler
+        of the two, and has two cases:
+
+            use syspkg
+            use "localfile"
+
+        The first form, which does not have the package name quoted, will
+        search the system include paths for the package listed. It does not
+        search relative to the file or the compiler working directory.
+
+        The quoted form searches the current directory for a use file named
+        "localpkg" and imports it.
+
+        The 'pkg' keyword allows you to define a (partial) package by
+        listing the symbols and types for export. For example,
+
+            pkg mypkg =
+                type mytype
+
+                const Myconst   : int = 42
+                const myfunc    : (v : int -> bool)
+            ;;
+
+        declares a package "mypkg", which defines three exports, "mytype",
+        "Myconst", and "myfunc". The definitions of the values may be
+        defined in the 'pkg' specification, but it is preferred to implement
+        them in the body of the code for readability. Scanning the export
+        list is desirable from a readability perspective.
+
+    3.5. Scoping:
+
+            Myrddin is a lexically scoped language, with namespaces and types
+        defined in a way that facilitates separate compilation with minimal
+        burden on the linker.
+        
+        In Myrddin, declarations may appear in any order, and be used at any
+        point at which it is in scope. Any global symbols are initialized
+        before the program begins. Any nonglobal symbols are initialized on
+        the line where they are declared, if they have an initializer.
+        Otherwise, their contents are indeterminate. This decision allows for
+        slightly strange code, but allows for mutually recursive functions
+        with no forward declarations or special cases. That is, functions
+        may call each other without regards to order of declaration:
+
+                const f = {; g() }
+                const g = {; f() }
+
+        3.5.1. Scope Rules:
+
+            Myrddin follows the usual lexical scoping rules. A variable
+            may be defined on any line in the program. From there, any
+            expressions within that block and its sub blocks may refer
+            to it.
+
+            The variables declared in constructs starting a block are
+            scoped to that block. For example, in `for var i = 0; ...`,
+            the variable `i` is scoped to the body of the for loop.
+            In the function `{x, y; funcbody()}`, the variables `x` and
+            `y` are scoped to the body of the function.
+
+            Variables may shadow other variables in enclosing scopes, with the
+            exception of captured variables in pattern matches. The rules for
+            matches are covered in depth in section 6.3, but the rationale for
+            this is to prevent ambiguity when matching against defined
+            constants.
+
+        3.5.2. Capturing Variables:
+
+            Closures are functions that can refer to variables from their
+            enclosing scopes. When a closure is created, it copies the
+            stack variables that are in scope by value. Global variables are
+            referred to normally. The copying is intended to facilitate moving
+            the closure to the heap with a simple block memory copy.
+
+            For example:
+
+                var x = 1
+                var closure = {; -> x}
+                x++
+                std.put("x: {}, closure(): {}\n", x, closure())
+
+            should output:
+
+                x: 2, closure(): 1
+
+        3.5.2. Namespaces:
+
+            A namespace introduced by importing a package is gramatically
+            equivalent to a struct member lookup. The namespace is not
+            optional.
+
+    3.6. Program Initialization:
+
+        Any file may define a single function name `__init__`. This function
+        will be invoked before `main` runs, and after the `__init__ `function
+        for all files included through use statements.
+
+
+
+4. TYPES:
+
+            type:       primitivetype | compositetype | aggrtype | nametype
+
+        The language defines a number of built in primitive types. These
+        are not keywords, and in fact live in a separate namespace from
+        the variable names. Yes, this does mean that you could, if you want,
+        define a variable named 'int'.
+
+        There are no implicit conversions within the language. All types
+        must be explicitly cast if you want to convert, and the casts must
+        be of compatible types, as will be described later.
+
+    4.1. Primitive types:
+
+        primitivetype:      misctype | inttype | flttype
+        misctype:           "void"  | "bool" | "char" | "byte"
+        inttype:            "int8"  |  "uint8" |
+                            "int16" | "uint16" |
+                            "int32" | "uint32" |
+                            "int64" | "uint64" |
+                            "int"   | "uint"
+        flttype:            "flt32" | "flt64"
+
+        It is important to note that these types are not keywords, but are
+        instead merely predefined identifiers in the type namespace.
+
+        'void' is a type containing exactly one value, `void`. It is a full
+        first class value, which can be assigned between variables, stored in
+        arrays, and used in any place any other type is used.  Void has size
+        `0`.
+
+        bool is a type that can only hold true and false. It can be assigned,
+        tested for equality, and used in the various boolean operators.
+
+        char is a 32 bit integer type, and is guaranteed to hold exactly one
+        Unicode codepoint. It is a numeric type. 
+
+        The various [u]intN types hold, as expected, signed and unsigned
+        integers of the named sizes respectively. All arithmetic on them is
+        done in complement twos of bit size N.
+
+        Int and uint vary by machine, but are at least 32 bits in size.
+
+        Similarly, floats hold floating point types with the indicated
+        precision. They are operated on according to the IEEE754 rules.
+
+            var x : int         declare x as an int
+            var y : flt32       declare y as a 32 bit float
+
+
+    4.2. User Defined Types:
+
+        4.2.1: Composite Types
+
+                compositetype:  ptrtype | slicetype | arraytype
+                ptrtype:        type "#"
+                slicetype:      type "[" ":" "]"
+                arraytype:      type "[" expr "]" | type "[" "..." "]"
+
+            Pointers are values that contain the address of the value of their
+            base type. If `t` is a type, then `t#` is a `pointer to t`.
+
+            Arrays are a sequence of N values, where N is part of the type, meaning
+            that different sizes are incompatible. They are passed by value. Their
+            size must be a compile time constant.
+
+            If the array size is specified as "...", then the array has zero bytes
+            allocated to store it, and bounds are not checked. This allows
+            flexible arrays. Flexible arrays are arrays defined at the end of
+            a struct, which do not contribute to the size of the struct. When
+            allocating a struct on the heap, extra space may be reserved for
+            the array, allowing variable sizes of trailing data. This is not
+            used commonly, but turns out to be useful for C ABI comatibility.
+
+            Flexible arrays can also be used another way when emulating the C
+            ABI. Myrddin has no tagless unions, but because runs of flexible
+            arrays take zero bytes, a union can be emulated using them.
+
+            Slices are similar to arrays in many contemporary languages.  They are
+            reference types that store the length of their contents. They are
+            declared by appending a '[:]' to the base type.
+
+                foo#        type: pointer to foo
+                foo[N]      type: array size N of foo
+                foo[:]      type: slice of foo
+
+        4.2.2. Aggregate types:
+
+                aggrtype:       tupletype | structtype | uniontype
+                tupletype:      "(" (tupleelt ",")+ ")"
+                structtype:     "struct" "\n" (declcore "\n"| "\n")* ";;"
+                uniontype:      "union" "\n" ("`" Ident [type] "\n"| "\n")* ";;"
+
+            Tuples are a sequence of unnamed values. They are declared by
+            putting the comma separated list of types within round brackets.
+
+            Structs are aggregations of types with named members. They are
+            declared by putting the word 'struct' before a block of declaration
+            cores (ie, declarations without the storage type specifier).
+
+            Unions are a tag and body pair. The tag defines the value that may
+            be held by the type at the current time. If the tag has an argument,
+            then this value may be extracted with a pattern match. Otherwise, only
+            the tag may be matched against.
+
+                (int, int, char)            a tuple of 2 ints and a char
+
+                struct                      a struct containing an int named
+                    a : int                 'a', and a char named 'b'.
+                    b : char
+                ;;
+
+                union                       a union containing one of
+                    `Thing int              int or char. The values are not
+                    `Other flt32            named, but they are tagged.
+                ;;
+
+        4.2.3. Named Types:
+
+                tydef:          "type" ident ["(" params ")"] = type
+                params:         typaram ("," typaram)*
+
+                nametype:       name ["(" typeargs ")"]
+                typeargs:       type ("," type)*
+
+
+            Users can define new types based on other types. These named 
+            types may optionally have parameters, which make the type into
+            a parameterized type.
+            
+            For example:
+
+                type size = int64
+
+            would define a new type, distinct from int64, but inheriting
+            the same traits.
+
+                type list(@a) = struct
+                    next : list(@a)#
+                    val : @a
+                ;;
+
+            would define a parameterized type named `list`, which takes a single
+            type parameter `@a`. When this type is used, it must be supplied a
+            type argument, which will be substituted throughout the right hand
+            side of the type definition. For example:
+
+                var x : list(int)
+
+            would specialize the above list type to an integer. All
+            specializations with compatible types are compatible.
+
+    4.3. Generic types:
+
+            typaram:        "@" ident ["::" paramlist]
+            paramlist:      ident | "(" ident ("," ident)* ")"
+            
+
+        A nametype refers to a (potentially parameterized) named type, as
+        defined in section 4.5.
+
+        A typaram ("@ident") is a type parameter. It is introduced as either a
+        parameter of a generic declaration, or as a type paramter in a
+        defined type. It can be constrained by any number of traits, as
+        described in section 4.6.
+
+        These types must be specialized to a concrete type in order to be
+        used.
+
+            @foo                        A type parameter
+                                        named '@foo'.
+
+    4.4. Traits and Impls:
+
+        4.4.1. Traits:
+
+                traitdef:       "trait" ident traittypes "=" traitbody ";;"
+                traittypes:     typaram ["->" type ("," type)*]
+                traitbody:      (name ":" type)*
+
+            Traits provide an interface that types implementing the trait
+            must conform to. They are defined using the `trait` keyword,
+            and implemented using the `impl` keyword.
+
+            A trait is defined over a primary type, and may also define
+            a number of auxiliary types that the implementation can make
+            more specific. The body of the trait lists a number of
+            declarations that must be implemented by the implementation of the
+            trait. This body may be empty.
+            
+            For example:
+
+                trait foo @a = ;;
+
+            defines a trait named `foo`. This trait has an empty body. It
+            applies over a type parameter named @a.
+
+            The definition:
+
+                trait foo @a -> @aux = ;;
+
+            is similar, but also has a single auxiliary type. This type can be
+            used to associate types with the primary type when the impl is
+            specialized. For example:
+
+                trait gettable @container -> @contained =
+                    get : (c : @container -> @contained)
+                ;;
+
+            would define a trait that requires a get function which accepts
+            a parameter of type `@container`, and returns a value of type
+            `@contained`.
+
+        4.4.2. Impls:
+
+                implstmt:        "impl" ident impltypes "=" implbody
+                impltypes:       type ["->" type ("," type)*]
+                implbody:        (name [":" type] "=" expr)*
+
+            Impls take the interfaces provided by traits, and attach them
+            to types, as well as providing the concrete implementation of
+            these types. The declarations are inserted into the global
+            namespace.
+
+            The declarations need not be functions, and if the types can
+            be appropriately inferred, can define impl specific constants.
+
+
+    4.5. Type Inference:
+
+        Myrddin uses a variant on the Hindley Milner type system. The
+        largest divergence is the lack of implicit generalization when
+        a type is unconstrained. In Myrddin, this unconstrained type
+        results in a failure in type checking.
+
+        4.5.1. Initialization:
+
+            In the Myrddin type system, each leaf expression is assigned an
+            appropriate type, or a placeholder. For clarity in the
+            description, this will be called a type variable, and indicated by
+            `$n`, where n is an integer which uniquely identifies the type
+            variable. This is an implementation detail of type inference, and
+            is not accessible by users.
+
+            When a generic type is encountered, it is freshened. Freshening a
+            generic type replaces all free type parameters in the type with a
+            type variable, inheriting all of the traits. So, a type '@a' is
+            replaced with the type '$1', and a trait-constrained type
+            '@a::foo' is replaced with a trait constrained type '$1::foo'.
+            This is also done for subtypes. For example, '@a#' becomes '$t#'
+
+            Once each leaf expression is assigned a type, a depth first walk
+            over the tree is done. Each leaf's type is resolved as well as it
+            can be:
+
+                - Declarations are looked up, and their types are unified with
+                variables that refer to them.
+                - string, character, and boolean literals are unified with the
+                specific type that represents them.
+                - Types are freshened. Freshening is the process of replacing
+                unbound type parameters with type variables, such that
+                '@a::(integral,numeric)' is replaced with the type variable
+                '$n::(integral,numeric)'.
+                - Union tags are registered for delayed unification, with the type
+                for unions being the declaration type of the variable.
+
+            Note that a generic declaration must *not* have its type unfied with
+            its use until after it has been freshened. This may imply that the
+            type of a generic must be registered for delayed unification.
+
+        4.5.2. Unification:
+
+            The core of type inference is unification. Unification makes
+            two values equal. This proceeds in several cases.
+
+                - If both types being unified are type variables,
+                  then the type variables are set to be equal. The
+                  set union of the required traits is attached to
+                  the type variable.
+
+                - If one type is a type variable, and the other is
+                  a concrete type, then the type variable is set to
+                  the concrete type. All traits on the type variable
+                  must be satisfied.
+
+                - If both types are compatible concrete types, then
+                  all subtypes are unfied recursively.
+
+                - If both types are incompatible concrete types, a
+                  type error is flagged.
+
+            For example:
+
+                unify($t1, $t2)
+                        => we set $t1 = $t2
+
+                unify($t1, int)
+                        => we set $t1 = int
+
+                unify(int, int)
+                        => success, int is an int
+
+                unify(int, char)
+                        => error, char != int
+
+                unify(list($t1), list(int)) 
+                        => list is compatible, so we unify subtypes.
+                           $t1 is set to int.
+                           success, list($t1) is set to list(int)
+
+            Once the types of the leaf nodes is initialized, type inference
+            proceeds via unification. Each expression using the leaves is
+            checked.  The operator type is freshened, and then the expressions
+            are unified.
+
+            Unification of expressions proceeds by taking the types, and
+            mapping corresponding parts of the expression to each other. 
+            
+            For unifying two types `t1` and `t2`, the following rules are
+            observed:
+            
+            First, the most specific mapping that has been derived is looked
+            up. Then, one of the following rules are followed:
+
+            Case 1:
+
+                If t1 is a type variable, and t2 is a type variable, then t1
+                is mapped to t2, and the list of traits from t1 is appended to
+                the list of traits for t2. The delayed type for t1 is
+                transferred to t2, if t2 does not have a delayed type yet.
+                Otherwise, the delayed types are unified.
+
+            Case 2: 
+
+                If t1 is a type variable, and t2 is not a type variable, then
+                t1 is checked for recursive inclusions and trait
+                incompatility.
+                
+                If t2 refers to t1 by value, then the type would be infinitely
+                sized, and therefore the program must be rejected with a type
+                error. If t2 does not satisfy all the traits that t1 requires,
+                then the program must be rejected with a type error.
+
+            Case 3:
+
+                If the type t1 is not a type variable, and t2 is a type
+                variable, then t1 and t2 are swapped, and the rules for case 2
+                are applied.
+
+            Case 4:
+
+                If neither the type `t1` and `t2` is a variable type, then the
+                following rules are applied, in order.
+
+                    - If the types are arrays, then their sizes are checked.
+                      If only one of the types has an array size inferred,
+                      then the size is transferred to the other. Otherwise,
+                      the sizes are verified for equality after constant
+                      folding. If the sizes mismatch, then the program must be
+                      rejected with a type error.
+
+                    - If one of the types is a named type, then all the
+                      parameters passed to the named type are unified
+                      recursively.
+
+                    - If the types are equivalent at the root (ie, $1# and
+                      int# are both pointers at the root), then all subtypes
+                      are recursively unfied. The number of subtypes for both
+                      types must be the same. If the types are not equivalent
+                      at the root, then the program must be rejected with a
+                      type error.
+
+                    - If the base type of the expression is a union, then all
+                      union tags associated with the `t1` and `t2` are unified
+                      recursively.
+
+                    - If the base type of an expression is a struct, then all
+                      struct members associated with `t1` and `t2` are unified
+                      recursively.
+
+            A special case exists for variadic functions, where the type of a
+            variadic functon is unified argument by argument, up to the first
+            variadic argument. Any arguments which are part of the variadic
+            argument list are left unconstrained.
+
+            When all expressions are inferred, and all declaration types
+            have been unified with their initializer types, then delayed
+            unification is applied.
+
+        4.5.3. Delayed Unification
+
+            In order to allow for the assignment of literals to defined types,
+            when a union literal or integer literal has its type inferred,
+            instead of immediately unifying it with a concrete type, a delayed
+            unification is recorded. Because checking the validity of members
+            is impossible when the base type is not known, member lookups are
+            also inserted into the delayed unification list.
+
+            After the initial unification pass is complete, the delayed
+            unification list is walked, and any unifications on this list
+            are applied. Because a delayed unification may complete members
+            and permit additional auxiliary type lookups, this step may need
+            to be repeated a number of times, although this is rare: Usually
+            a single pass suffices.
+
+            At this point, default types are applied. An unconstrained type
+            with type $t::(numeric,integral) is replaced with int. An
+            unconstrained type with $t::(numeric,floating) is replaced with
+            flt64.
+
+    4.6. Built In Traits:
+
+        4.6.1. numeric:
+
+            The numeric trait is a built in trait which implies that the
+            operand is a number. A number of operators require it, including
+            comparisons and arithmetic operations. It is present on the types
+
+                byte char
+                int8 uint8 int16 uint16
+                int32 uint32 int64 uint64
+                flt32 flt64
+
+            A user cannot currently implement this trait on their types.
+
+        4.6.2. integral:
+
+            The integral trait is a built in trait which implies that the
+            operand is an integer. A number of operators require it, including
+            bitwise operators and increments. It is implemented over the
+            following types:
+
+                byte char
+                int8 uint8 int16 uint16
+                int32 uint32 int64 uint64
+
+            A user cannot currently implement this trait on their types.
+
+        4.6.3. floating:
+
+            The floating trait is a built in trait which implies that the
+            operand is an floating point value.  It is implemented for the
+            following types:
+
+                flt32 flt64
+
+            A user cannot currently implement this trait on their types.
+
+        4.6.4. indexable:
+
+            The indexable trait is a built in trait which implies that
+            the index operator can be used on the type. It is implemented
+            for slice and array types.
+
+            A user cannot currently implement this trait on their types.
+
+        4.6.5. sliceable
+
+            The sliceable trait is a built in trait which implies that
+            the slice soperator can be used on the type. It is implemented
+            for slice, pointer, and array types.
+
+            A user cannot currently implement this trait on their types.
+
+        4.6.6. function:
+
+            The function trait is a built in trait which implies that the
+            argument is a callable function. It specifies nothing about the
+            parameters, which is a significant flaw.  It is implemented for
+            all function types.
+
+            A user cannot currently implement this trait on their types.
+
+        4.6.7. iterable:
+
+            The iterable trait implies that a for loop can iterate over
+            the values provided by this type. The iterable trait is the
+            only one of the builtin traits which users can implement. It
+            has the signature:
+
+                trait iterable @it -> @val =
+                    __iternext__ : (itp : @it#, valp : @val# -> bool)
+                    __iterfin__ : (itp : @it#, valp : @val# -> void)
+                ;;
+
+            A for loop iterating over an iterable will call __iternext__
+            to get a value for the iteration of a loop. The result of
+            __iternext__ should return `true` if the loop should continue
+            and `false` if the loop should stop. If the loop should
+            continue, then the implementation of __iternext__ should store
+            the value for the next loop interation into val#.
+
+            __iterfin__ is called at the end of the loop to do any cleanup
+            of resources set up by __iternext__.
+
+            The iterable trait is implemented for slices and arrays.
+
+5. VALUES AND EXPRESSIONS
+
+    5.1. Literal Values
+
+        5.1.1. Atomic Literals:
+
+                literal:    strlit | chrlit | intlit |
+                            boollit | voidlit | floatlit |
+                            funclit | seqlit | tuplit
+
+                strlit:     \"(byte|escape)*\"
+                chrlit:     \'(utf8seq|escape)\'
+                char:       <any byte value>
+                boollit:    "true"|"false"
+                voidlit:    "void"
+                escape:     <any escape sequence>
+                intlit:     "0x" digits | "0o" digits | "0b" digits | digits
+                floatlit:   digit+"."digit+["e" digit+]
+
+            5.1.1.1. String Literals:
+
+                String literals represent a compact method of representing a
+                byte array. Any byte values are allowed in a string literal,
+                and will be spit out again by the compiler unmodified, with
+                the exception of escape sequences.
+
+                There are a number of escape sequences supported for both character
+                and string literals:
+                    \n          newline
+                    \r          carriage return
+                    \t          tab
+                    \b          backspace
+                    \"          double quote
+                    \'          single quote
+                    \v          vertical tab
+                    \\          single slash
+                    \0          nul character
+                    \xDD        single byte value, where DD are two hex digits.
+                    \u{xxx}     unicode escape, emitted as utf8.
+
+                String literals begin with a ", and continue to the next
+                unescaped ".
+
+                    e.g. "foo\"bar"
+
+                Multiple consecutive string literals are implicitly merged to create
+                a single combined string literal. To allow a string literal to span
+                across multiple lines, the new line characters must be escaped.
+                
+                    e.g. "foo" \
+                        "bar"
+
+                They have the type `byte[:]`
+
+            5.1.1.2. Character Literals:
+
+                Character literals represent a single codepoint in the
+                character set. A character starts with a single quote,
+                contains a single codepoint worth of text, encoded either as
+                an escape sequence or in the input character set for the
+                compiler (generally UTF8).  They share the same set of escape
+                sequences as string literals.
+
+                    e.g. 'א', '\n', '\u{1234}'
+
+                They have the type `char`.
+
+            5.1.1.3. Integer Literals
+
+                Integers literals are a sequence of digits, beginning with a digit
+                and possibly separated by underscores. They may be prefixed with
+                "0x" to indicate that the following number is a hexadecimal value,
+                0o to indicate an octal value, or 0b to indicate a binary value.
+                Decimal values are not prefixed.
+
+                    e.g. 0x123_fff, 0b1111, 0o777, 1234
+
+                They have the type `@a::(numeric,integral)
+
+            5.1.1.4: Boolean Literals:
+
+                Boolean literals are spelled `true` or `false`.
+                Unsurprisingly, they evaluate to `true` or `false`
+                respectively.
+
+                    e.g. true, false
+
+                They have the type `bool`
+
+            5.1.1.5: Void Literals:
+
+                Void literals are spelled `void`. They evaluate to the void
+                value, a value that takes zero bytes storage, and contains
+                only the value `void`. Like my soul.
+
+                    e.g. void
+
+                They have type `void`.
+
+            5.1.1.6: Floating point literals:
+
+                Floating-point literals are also a sequence of digits beginning with a
+                digit and possibly separated by underscores. Floating point
+                literals are always in decimal.
+
+                    e.g. 123.456, 10.0e7, 1_000.
+
+                They have type `@a::(numeric,floating)`
+
+
+        5.1.2. Sequence and Tuple Literals:
+            
+                seqlit:     "[" structelts | arrayelts "]"
+                tuplit:     "(" tuplelts ")"
+
+                structelts: ("." ident "=" expr)+
+                arrayelts:  (expr ":" expr | expr)*
+                tupelts:    expr ("," expr)* [","]
+
+            Sequence literals are used to initialize either a structure
+            or an array. Both structure and array literals are bracketed
+            by square brackets. Tuple literals are used to initialize a
+            tuple, and are bracketed by parentheses.
+
+            Struct literals describe a fully initialized struct value.
+            A struct must have at least one member specified, in
+            order to distinguish them from the empty array literal. All
+            members which are designated with a `.name` expression are
+            initialized to the expression passed. If an initializer is
+            omitted, then the value is initialized to the zero value for
+            that type.
+
+            Sequence literals describe either an array or a structure
+            literal. They begin with a '[', followed by an initializer
+            sequence and closing ']'. For array literals, the initializer
+            sequence is either an indexed initializer sequence[4], or an
+            unindexed initializer sequence. For struct literals, the
+            initializer sequence is always a named initializer sequence.
+
+            All elements not initialized in the literal expression are
+            filled with zero bytes.
+
+            An unindexed initializer sequence is simply a comma separated
+            list of values. An indexed initializer sequence contains a
+            '#number=value' comma separated sequence, which indicates the
+            index of the array into which the value is inserted. A named
+            initializer sequence contains a comma separated list of
+            '.name=value' pairs.
+
+
+            A tuple literal is a parentheses separated list of values.
+            A single element tuple contains a trailing comma.
+
+            Example: Struct literal:
+                [.a = 42, .b="str"]
+
+            Example: Array literal:
+                [1,2,3], [2:3, 1:2, 0:1], []
+
+            Example: Tuple literals:
+                (1,), (1,'b',"three")
+
+            A tuple has the type of its constituent values grouped
+            into a tuple:
+
+                (@a, @b, @c, ..., @z)
+
+
+        5.1.3. Function Literals:
+
+                funclit:        "{" arglist ["->" rettype] "\n" blockbody "}"
+                arglist:        (ident [":" type])*
+
+            Function literals describe a function. They begin with a '{',
+            followed by a newline-terminated argument list, followed by a
+            body and closing '}'. These may be specified at any place that
+            an expression is specified, assigned to any variable, and are
+            not distinguished from expressions in any significant way.
+
+            Function literals may refer to variables outside of their scope.
+            These are treated differently in a number of ways. Variables with
+            global scope are used directly, by value.
+            
+            If a function is defined where stack variables are in scope,
+            and it refers to them, then the stack variables shall be copied
+            to an environment on the stack. That environment is scoped to
+            the lifetime of the stack frame in which it was defined. If it
+            does not refer to any of its enclosing stack variables, then
+            this environment will not be created or accessed by the function.
+
+            This environment must be transferrable to the heap in an
+            implementation specific manner.
+
+            Example: Empty function literal:
+                {;}
+
+            Example: Function literal
+
+                {a : int, b
+                    -> a + b
+                }
+
+            Example: Nested function with environment:
+
+                const fn = {a
+                    var b = {; a + 1}
+                }
+
+            A function literal's arity is the same as the number of arguments
+            it takes. The type of the funciton argument list is derived from
+            the type of the arguments. The return type may be provided, or
+            can be left to type inference.
+
+        5.1.4: Labels:
+
+                label:  ":" ident
+                goto:   "goto" ident
+
+            Finally, while strictly not a literal, it's not a control
+            flow construct either. Labels are identifiers preceded by
+            colons.
+
+                e.g. :my_label
+
+            They can be used as targets for gotos, as follows:
+
+                goto my_label
+
+            the ':' is not part of the label name.
+
+    5.2. Expressions:
+
+        5.2.1. Summary and Precedence:
+
+                expr:              expr <binop> expr | prefixexpr | postfixexpr
+                postfixexpr:       <prefixop> postfixexpr
+                prefixexpr:        atomicexpr <unaryop>
+
+            Myrddin expressions should be fairly familiar to most programmers.
+            Expressions are represented by a precedence sorted heirarchy of
+            binary operators. These operators operate on prefix expressions,
+            which in turn operate on postfix expressions. And postfix
+            expressions operate on parenthesized expressions, literals, or
+            values.
+
+            For integers, all operations are done in complement twos
+            arithmetic, with the same bit width as the type being operated on.
+            For floating point values, the operation is according to the
+            IEEE754 rules.
+
+            The operators are listed below in order of precedence, and a short
+            summary of what they do is given. For simplicity, 'x' and 'y' fill
+            in for any expression composed of operators with higher precedence
+            than the operator defined. Similiarly, 'e' will stand in for any
+            valid expression, regardless of precedence. Assignment is right
+            associative. All other expressions are left associative.
+
+            Arguments are evaluated in the order of associativity. That is,
+            if an operator is left associative, then the left hand side of
+            the operator will be evaluated before the right side. If the
+            operator is right associative, the opposite is true.
+
+            The specific semantics are covered in later parts of section 5.2.
+
+            Precedence 11:
+                    x.name          Member lookup
+                    x++             Postincrement
+                    x--             Postdecremendoc/libstd/varargst
+                    x#              Dereference
+                    x[e]            Index
+                    x[lo:hi]        Slice
+                    x(arg,list)     Call
+
+            Precedence 10:
+                    &x              Address
+                    !x              Logical negation
+                    ~x              Bitwise negation
+                    +x              Positive (no operation)
+                    -x              Negate x
+                    `Tag val        Union constructor
+
+            Precedence 9:
+                    x << y          Shift left
+                    x >> y          Shift right
+
+            Precedence 8:
+                    x * y           Multiply
+                    x / y           Divide
+                    x % y           Modulo
+
+            Precedence 7:
+                    x + y           Add
+                    x - y           Subtract
+
+            Precedence 6:
+                    x & y           Bitwise and
+
+            Precedence 5:
+                    x | y           Bitwise or
+                    x ^ y           Bitwise xor
+
+            Precedence 4:
+                    x == y          Equality
+                    x != y          Inequality
+                    x > y           Greater than
+                    x >= y          Greater than or equal to
+                    x < y           Less than
+                    x <= y          Less than or equal to
+
+            Precedence 3:
+                    x && y          Logical and
+
+            Precedence 2:
+                    x || y          Logical or
+
+            Precedence 1: Assignment Operators
+                    x = y           Assign                  Right assoc
+                    x += y          Fused add/assign        Right assoc
+                    x -= y          Fused sub/assign        Right assoc
+                    x *= y          Fused mul/assign        Right assoc
+                    x /= y          Fused div/assign        Right assoc
+                    x %= y          Fused mod/assign        Right assoc
+                    x |= y          Fused or/assign         Right assoc
+                    x ^= y          Fused xor/assign        Right assoc
+                    x &= y          Fused and/assign        Right assoc
+                    x <<= y         Fused shl/assign        Right assoc
+                    x >>= y         Fused shr/assign        Right assoc
+
+            Precedence 0:
+                    -> x            Return expression
+
+        5.2.2. Lvalues and Rvalues:
+
+            Expressions can largely be grouped into two categories: lvaues and
+            rvalues. Lvalues are expressions that may appear on the left hand
+            side of an assignment. Rvalues are expressions that may appear on
+            the right hand side of an assignment. All lvalues are also
+            rvalues.
+
+            Lvalues consist of the following expressions:
+
+                - Variables.
+                - Gaps.
+                - Index Expressions
+                - Pointer Dereferences
+                - Member lookups.
+                - Tuple constructors
+
+            Assigning to an lvalue stores the value on the rhs of the
+            expression into the location designated by the lhs, with the
+            exception of gaps and tuple constructors.
+
+            Assigning into a gap lvalue discards it.
+            
+            When assigning to a tuple constructor, the rhs of the expression
+            is broken up elementwise and stored into each lvalue of the tuple
+            constructor element by element. For example:
+
+                (a, b#, _) = tuplefunc()
+
+            will store the first element of the tuple returned by tuplefunc
+            into a, the second into b#, and the third into the gap.
+
+        5.2.3. Atomic Expressions:
+            
+                atomicexpr:     ident | gap | literal | "(" expr ")" | 
+                                "sizeof" "(" type ")" | castexpr |
+                                "impl" "(" name "," type ")"
+                castexpr:       "(" expr ":" type ")"
+                gap:            "_"
+
+            Atomic expressions are the building blocks of expressions, and
+            are either parenthesized expressions or directly represent
+            literals. Literals are covered in depth in section 4.2.
+
+            An identifier specifies a variable, and are looked up via
+            the scoping rules specified in section 4.9.
+
+            Gap expressions (`_`) represent an anonymous sink value. Anything
+            can be assigned to a gap, and it may be used in pattern matching.
+            It is equivalent to creating a new temporary that is never read
+            from whenever it is used. For example:
+
+                _ = 123
+
+            is equivalent to:
+                
+                var anon666 = 123
+
+            In match contexts, it is equivalent to a fresh variable in the
+            match, again, given that it is never read from in the body of the
+            match.
+
+            An impl expression chooses the implementation of the given trait
+            declaration for the given type. It is useful for refering to trait
+            declarations in a generic context. It also allows you to
+            disambiguate a trait declaration whose type does not refer to the
+            trait parameter.
+
+        5.2.4. Cast Expressions:
+
+            Cast expressions convert a value from one type to another.  Some
+            conversions may lose precision, others may convert back and forth
+            without data loss. The former case is referred to as lossy
+            conversion. The latter case is known as round trip conversion.
+
+            Casting proceeds according to the following rules:
+
+
+                SType   DType        Action
+                -------------------------------------------------------------
+                int/int Conversions
+                -------------------------------------------------------------
+                intN    intK        If n < k, sign extend the source
+                                    type, filling the top bits with the
+                                    sign bit of the source until it is the
+                                    same width as the destination type.
+
+                                    if n > k, truncate the top bits of the
+                                    source to the width of the destination
+                                    type.
+
+                uintN  uintK        If n < k, zero extend the source
+                                    type, filling the top bits with zero
+                                    until it is the same width as the
+                                    destination type.
+
+                                    If n > k, truncate the top bits of the
+                                    source to the width of the destination
+                                    type.
+                -------------------------------------------------------------
+                int/float conversions
+                -------------------------------------------------------------
+                intN    fltN        The closest representable integer value
+                                    to the source should be stored in the
+                                    destination.
+
+                uintN   fltN        The closest representable integer value
+                                    to the source should be stored in the
+                                    destination.
+
+                fltN    intN        The closest representable integer value
+                                    to the source should be stored in the
+                                    destination.
+
+                fltN    uintN       The closest representable integer value
+                                    to the source should be stored in the
+                                    destination.
+                -------------------------------------------------------------
+                int/pointer conversions
+                -------------------------------------------------------------
+                intN   T#           Extend the source value to the width
+                                    of a pointer in bits in an implementation
+                                    defined manner.
+
+                uintN  T#           Extend the source value to the width
+                                    of a pointer in bits in an implementation
+                                    defined manner.
+
+                T#     intN         Convert the address of the pointer to an
+                                    integer in an implementation specified
+                                    manner. There should exist at least one
+                                    integer type for which this conversion
+                                    will round trip.
+
+                T#     uintN        Convert the address of the pointer to an
+                                    integer in an implementation specified
+                                    manner. There should exist at least one
+                                    integer type for which this conversion
+                                    will round trip.
+                -------------------------------------------------------------
+                pointer/pointer conversions
+                -------------------------------------------------------------
+                T#      U#          If the destination type has compatible
+                                    alignment and other storage requirements,
+                                    the pointer should be converted losslessly
+                                    and in a round-tripping manner to point to
+                                    a U. If it does not have compatible
+                                    requirements, the conversion is not
+                                    required to round trip safely, but should
+                                    still produce a valid pointer.
+                -------------------------------------------------------------
+                pointer/slice conversions
+                -------------------------------------------------------------
+                T[:]    T#          Returns a pointer to t[0]
+                -------------------------------------------------------------
+                pointer/function conversions
+                -------------------------------------------------------------
+                (args->ret)   T#    Returns a pointer to an implementation
+                                    specific value representing the executable
+                                    code for the function.
+
+                -------------------------------------------------------------
+                arbitrary type conversions
+                -------------------------------------------------------------
+                T       U           Returns a T as a U. T must be transitively
+                                    defined in terms of U, or U in terms of T
+                                    for this cast to be valid.
+
+
+
+        5.2.5. Assignments:
+        
+                lval = rval, lval <op>= rval
+
+            The assignment operators group from right to left. These are the
+            only operators that have right associativity. All of them require
+            the left operand to be an lvalue. The value of the right hand side
+            of the expression is stored on the left hand side after this
+            statement has executed.
+
+            The expression is similar to applying the expression to the lhs
+            and rhs of the expression before storing into the lhs. However,
+            the lvalue of the expression is evaluated fully before being
+            computed and stored into, meaning that any side effects in the
+            subexpressions will only be applied once.
+
+            Type:
+
+                ( e1 : @a <op>= e2 : @a ) : @a
+
+        5.2.6. Logical Or:
+        
+                e1 || e2 
+
+            The `||` operator returns true if the left hand side evaluates to
+            true. Otherwise it returns the result of evaluating the lhs. It is
+            guaranteed if the rhs is true, the lhs will not be evaluated.
+
+            Types:
+
+                ( e1 : bool || e2 : bool ) : bool
+
+        5.2.7. Logical And:
+
+                expr && expr
+
+            The `&&` operator returns false if the left hand side evaluates to
+            false. Otherwise it returns the result of evaluating the lhs. It
+            is guaranteed if the rhs is false, the lhs will not be evaluated.
+
+            The left hand side and right hand side of the expression must
+            be of the same type. The whole expression evaluates to the type
+            of the lhs.
+
+            Type:
+
+                ( e1 : bool && e2 : bool ) : bool
+
+        5.2.8: Logical Negation:
+
+                !expr
+
+            Takes the boolean expression `expr` and inverts its truth value,
+            evaluating to `true` when `expr` is false, and `false` when `expr`
+            is true.
+
+            Type:
+
+                !(expr : bool) : bool
+
+        5.2.9. Equality Comparisons:
+        
+                expr == expr, expr != expr
+
+            The equality operators do a shallow identity comparison between
+            types. The `==` operator yields true if the values compare equal,
+            or false if they compare unequal. The `!=` operator evaluates to
+            the inverse of this.
+                
+            Type:
+
+                ( e1 : @a == e2 : @a ) : bool
+                ( e1 : @a != e2 : @a ) : bool
+
+        5.2.10. Relational Comparisons:
+        
+                expr > expr, expr >= expr, expr < expr, expr <= expr
+
+            The relational operators (>, >=, <, <=) compare two values
+            numerically. The `>` operator evaluates to true if its left
+            operand is greater than the right operand. The >= operand returns
+            true if the left operand is greater than or equal to the right
+            operand. The `<` and `<=` operators are similar, but compare
+            for less than.
+
+            Type:
+
+                ( e1 : @a OP e2 : @a ) : bool
+                where @a :: numeric
+
+
+        5.2.11. Union Constructors:
+        
+                `Name expr:
+
+            The union constructor operator takes the value in `expr` and wraps
+            it in a union. The type of the expression and the argument of the
+            union tag must match. The result of this expression is subject to
+            delayed unification, with a default value being the type of the
+            union the tag belongs to.
+
+            Type:
+
+                Delayed unification with the type of the union tag.
+
+        5.2.12. Bitwise:
+
+                expr | expr, expr ^ expr, expr & expr
+
+            These operators (|, ^, &) compute the bitwise or, xor, and and
+            of their operands respectively. The arguments must be integers.
+
+            Type:
+
+                (e1 : @a OP e2:@a) : @a
+                where @a :: integral
+
+        5.2.13. Addition:
+        
+                expr + expr, expr - expr:
+
+            These operators (+, -) add and subtract their operands. For
+            integers, all operations are done in complement twos arithmetic,
+            with the same bit width as the type being operated on. For
+            floating point values, the operation is according to the IEEE754
+            rules.
+
+            Type:
+
+                ( e1 : @a OP e2 : @a ) : bool
+                where @a :: numeric
+
+        
+        5.2.14. Multiplication and Division
+        
+                expr * expr, expr / expr
+
+            These operators (+, -) multiply and divide their operands,
+            according to the usual arithmetic rules.
+
+            Type:
+
+                ( e1 : @a OP e2 : @a ) : bool
+                where @a :: numeric
+
+        5.2.15. Modulo:
+        
+                expr % expr
+
+            The modulo operator computes the remainder of the left operand
+            when divided by the right operand.
+
+            Type:
+
+                ( e1 : @a OP e2 : @a ) : bool
+                where @a :: (numeric,integral)
+
+        5.2.16. Shift:
+
+                expr >> expr, expr << expr
+
+            The shift operators (>>, <<) perform right or left shift on their
+            operands respectively. If an operand is signed, a right shift will
+            shifts sign extend its operand. If it is unsigned, it will fill
+            the top bits with zeros.
+
+            Shifting by more bits than the size of the type is implementation
+            defined.
+
+            Type:
+
+                (e1 : @a OP e2:@a) : @a
+                where @a :: integral
+
+        5.2.17: Postincrement, Postdecrement:
+
+                expr++, expr--
+
+            These expressions evaluate to `expr`, and produce a decrement after
+            the expression is fully evaluated. Multiple increments and
+            decrements within the same expression are aggregated and applied
+            together. For example:
+
+                y = x++ + x++
+
+            is equivalent to:
+
+                y = x + x
+                x += 2
+
+            The operand must be integral.
+
+            Type:
+
+                (e1++ : @a) : @a
+                (e1-- : @a) : @a
+                where @a :: integral
+
+        5.2.18: Address:
+
+                &expr
+
+            The `&` operator computes the address of the object referred to
+            by `expr`. `expr` must be an lvalue.
+
+            Type:
+            
+                &(expr : @a) : @a#
+
+        5.2.19: Dereference:
+
+                expr#
+
+            The `#` operator refers to the value at the pointer `expr`. This
+            is an lvalue, and may be stored to.
+
+            The pointer being dereferenced may have at some point come from a
+            cast expression. It may also be constructed by arbitrary code via
+            integer manipulations and system specific memory allocation.
+
+            If this happens, there are two cases. If the pointed-to type of
+            the accessing pointer is larger than the declaration type of the
+            object, the behavior is undefined.  Similarly, if the pointer
+            value has an incompatible alignment at runtime, the behavior is
+            undefined. Otherwise, the value read back through the pointer is
+            implementation specific. These system specific values may include
+            trap representations.
+
+            Type:
+            
+                (expr : @a#)# : @a
+
+        5.2.20: Sign Operators:
+
+                -expr, +expr
+
+            The `-` operator computes the complement two negation of the value
+            `expr`. It may be applied to unsigned values. The `+` operator
+            only exists for symmetry, and is a no-op.
+
+            Type:
+            
+                OP(expr : @a) : @a
+
+
+        5.2.21: Member Lookup:
+
+                expr.name
+
+            Member lookup operates on two classes of types: User defined
+            struct and sequences. For user defined structs, the type of `expr`
+            must be a structure containing the member `name`. The result of
+            the expression is an lvalue of the type of that member.
+
+            For sequences such as slices or arrays, there is exactly one
+            member that may be accessed, `len`. The value returned is the
+            count of elements in the sequence.
+
+            Type:
+
+                (expr : <aggregate>).name : @a
+                (expr : <seq>).len : @idx
+                where @idx :: (integral,numeric)
+
+        5.2.22: Index:
+
+                expr[idx]
+
+            The indexing operator operates on slices and arrays. The
+            `idx`th value in the sequence is referred to. This expression
+            produces an lvalue.
+
+            If `idx` is larger than `expr.len` or smaller than 0, then the
+            program must terminate.
+
+            Type:
+
+                (expr : @a[N])[(idx : @idx)] : @a
+                (expr : @a[:])[(idx : @idx)] : @a
+                where @idx :: (integral,numeric)
+
+        5.2.23: Slice:
+
+                expr[lo:hi], expr[:hi], expr[lo:], expr[:]
+
+            The slice expression produces a sub-slice of the sequence or
+            pointer expression being sliced. The lower bound is inclusive, and
+            the upper bound is exclusive. The elements contained in this slice
+            are expr[lo]..expr[hi-1].
+            
+            If the lower bound is omitted, then it is implicitly zero. If the
+            upper bound is ommitted, then it is implicitly `expr.len`.
+
+            If the bounds are not fully contained within the slice being
+            indexed, the program must terminate.
+
+            Type:
+
+                (expr : @a[N])[(lo : @lo) : (hi : @hi)] : @a[:]
+                (expr : @a[:])[(lo : @lo) : (hi : @hi)] : @a[:]
+                (expr : @#)[(lo : @lo) : (hi : @hi)] : @a[:]
+                where @lo :: (integral,numeric)
+                and   @hi :: (integral,numeric)
+
+        5.2.24: Call:
+
+                expr()
+                expr(arg1, arg2)
+                expr(arg1, arg2, ...)
+
+            A function call expression takes an expression of type
+            (arg, list -> ret), and applies the arguments to it,
+            producing a value of type `ret`.  The argument types and
+            arity must must match, unless the final argument is of
+            type `...`.
+
+            If the final type is `...`, then the `...` consumes as many
+            arguments as are provided, and passes both them and an
+            implementation defined description of their types to the function.
+
+
+            Type:
+
+                (expr : @fn)(e1 : @a, e2 : @b) : @ret
+                where @fn is a function of type (@a, @b -> @ret)
+                or    @fn is a function of type (@a, ... -> ret)
+                adjusted appropriately for arity.
+
+
+
+6. CONTROL FLOW
+
+    The control statements in Myrddin are similar to those in many other
+    popular languages, and with the exception of 'match', there should
+    be no surprises to a user of any of the Algol derived languages.
+
+    6.1. Blocks:
+
+            block:      blockbody ";;"
+            blockbody:  (decl | stmt | tydef | "\n")*
+            stmt:       goto | break | continue | retexpr | label |
+                        ifstmt | forstmt | whilestmt | matchstmt
+
+        Blocks are the basic building block of functionality in Myrddin.  They
+        are simply sequences of statements that are completed one after the
+        other. They are generally terminated by a double semicolon (";;"),
+        although they may be terminated by keywords if they are part of a more
+        complex control flow construct.
+
+        Any declarations within the block are scoped to within the block,
+        and are not accessible outside of it. Their storage duration is
+        limited to within the block, and any attempts to access the associated
+        storage (via pointer, for example) is not valid.
+
+    6.2. Conditionals
+
+            ifstmt:     "if" cond "\n" blockbody
+                        ("elif" blockbody)*
+                        ["else" blockbody] ";;"
+
+
+        If statements branch one way or the other depending on the truth
+        value of their argument. The truth statement is separated from the
+        block body
+
+            if true
+                std.put("The program always get here")
+            elif elephant != mouse
+                std.put("...eh.")
+            else
+                std.put("The program never gets here")
+            ;;
+
+    6.3. Matches
+
+            matchstmt:  "match" expr "\n" matchpat* ";;"
+            matchpat:   "|" pat ":" blockbody
+            pat:        expr
+
+        Match statements perform deep pattern matching on values. They take as
+        an argument a value of type 't', and match it against a list of other
+        values of the same type.
+        
+        The patterns matched against may free variables, which will be bound
+        to the sub-value matched against.  The patterns are checked in order,
+        and the first matching pattern has its body executed, after which no
+        other patterns will be matched. This implies that if you have specific
+        patterns mixed with by more general ones, the specific patterns must
+        come first.
+
+        All potential cases must be covered exhaustively. Non-exhaustive
+        matches are a compilation error.
+
+        Match patterns can be one of the following:
+
+            - Wildcard patterns
+            - Gap patterns
+            - Atomic literal patterns
+            - String patterns
+            - Union patterns
+            - Tuple patterns
+            - Struct patterns
+            - Array patterns
+            - Constant patterns
+            - Pointer chasing patterns
+
+        6.3.1. Wildcards and Gaps:
+
+            Wildcard patterns an identifier that is not currently in scope.
+            This variable name captures the variable. That is, in the body of
+            the match, there will be a variable in scope with the same name as
+            the identifier, and it will contain a copy of the value that is
+            being matched against. A wildcard pattern always matches
+            successfully.
+
+            Gap patterns are identical to wildcard patterns, but they do not
+            capture a copy of the value being matched against.
+
+        6.3.2. Literal and Constant Patterns:
+
+            Most pattern matches types are literal patterns. These are simply
+            written out as a literal value of the type that is being matched
+            against.
+
+            Atomic literal patterns match on a literal value. The pattern is
+            compared to the value using semantics equivalent to the `==`
+            operator. If the `==` operator would return true, the match is
+            successful.
+
+            String patterns match a byte sequence. The pattern is compared to
+            the value by first comparing the lengths. Then, each byte in the
+            string is compared, in turn, to the byte of the pattern. If the
+            length and all characters are equal, the pattern succeeds.
+
+            Union patterns compare the union tag of the pattern wtih the union
+            tag on the value. If there is a union body associated with the
+            tag, then the pattern must also have a body. This is recursively
+            matched on.  If the tag and the body (if present) both match, this
+            match is considered successful.
+            
+            Tuple patterns proceed to recursively check each tuple element for
+            a match. If all elements match, this is a successful match.
+
+            Struct patterns recursively check each named member that is
+            provided.  Not all named members are mandatory. If a named member
+            is omitted, then it is equivalent to matching it against a gap
+            pattern. If all elements match, then this is a successful match.
+
+            Array patterns recursively check each member of the array that is
+            provided. The array length must be part of the match. If all array
+            elements match, then this is a successful match.
+
+            Constant patterns use a compile time constant that is in scope for
+            the pattern. The semantics are the same any of the literal
+            patterns listed above.
+
+        6.3.3. Pointer Chasing Patterns:
+
+            Pointer chasing patterns allow matching on pointer-to-values. They
+            are written with the `&` operator, as though you were taking the
+            address of the pattern being matched against.
+
+            This pattern is matched by dereferencing the value being matched,
+            and recursively matching the value against the pattern being
+            addressed.
+
+            The pointer provided to a pointer chasing match must be a valid
+            pointer. Providing an invalid pointer leads to undefined behavior.
+
+        6.4.4. Examples:
+
+            6.4.4.1. Wildcard:
+
+                var e = 123
+                match expr
+                | x:    std.put("x = {}\n", x)
+                ;;
+
+            6.4.4.2. Atomic Literal:
+
+                var e = 123
+                match expr
+                | 666:  std.put("wrong branch\n")
+                | 123:  std.put("correct match\n")
+                | _:    std.put("default branch\n")
+                ;;
+
+            6.4.4.3. Tuple Literal:
+
+                var e = (123, 999)
+                match expr
+                | (123, 666):   std.put("wrong branch\n")
+                | (123, 999):   std.put("right branch\n")
+                | _:            std.put("default branch\n")
+                ;;
+
+            6.4.4.3. Union Literal:
+
+                var e = `std.Some 123
+                match expr
+                | `std.Some 888:   std.put("wrong branch\n")
+                | `std.Some 123:   std.put("right branch\n")
+                | `std.Some x:     std.put("other wrong branch\n")
+                | `std.None:       std.put("other wrong branch\n")
+                ;;
+
+            6.4.4.4 Struct Literal:
+
+                type s = struct
+                    x : int
+                ;;
+
+                var e : s = [.x=999]
+                match expr
+                | [.x=123]:   td.put("wtf, x=123\n")
+                | [.x=x]:     std.put("x={}\n", x)
+                ;;
+
+            6.4.4.5 Pointer Chasing:
+
+                type s = struct
+                    x : int#
+                ;;
+
+                var p = 123
+                var e : s = [.x=&p]
+                match expr
+                | [.x=&123]:   td.put("good, x=123\n")
+                | [.x=&x]:     std.put("wtf, x={}\n", x)
+                ;;
+
+
+    6.4. Looping
+
+            forstmt:    foriter | foreach
+            foreach:    "for" pattern ":" expr "\n" block
+            foriter:    "for" init "\n" cond "\n" step "\n" block
+            whilestmt:  "while" cond "\n" block
+
+        For statements come in two forms. There are the C style for loops
+        which begin with an initializer, followed by a test condition,
+        followed by an increment action. For statements run the initializer
+        once before the loop is run, the test each on each iteration through
+        the loop before the body, and the increment on each iteration after
+        the body. If the loop is broken out of early (for example, by a goto),
+        the final increment will not be run. The syntax is as follows:
+
+            for init; test; increment
+                blockbody()
+            ;;
+
+        The second form is the collection iteration form. This form allows
+        for iterating over a collection of values contained within
+        something which is iterable. This form of loop can be used on any
+        iterable types. Iterable types are defined as slices, arrays, and any
+        type that implements the builtin iterable trait.
+
+            for pat : expr
+                blockbody()
+            ;;
+
+        The pattern applied in the for loop is a full match statement style
+        pattern match, and will filter any elements in the iteration
+        expression which do not match the value.
+
+        While loops are equivalent to for loops with empty initializers
+        and increments. They run the test on every iteration of the loop,
+        and exit only if it returns false.
+
+    6.5. Goto
+
+            label:      ":" ident
+            goto:       goto ident
+
+6. GRAMMAR:
+
+    /* top level */
+    file:       toplev*
+    toplev:     use | pkgdef | decl | traitdef | impldef | tydef
+
+    /* packages */
+    use:       "use" ident | strlit
+    pkgdef:    "pkg" [ident] "=" pkgbody ";;"
+    pkgbody:   (decl | attrs tydef | traitdef | impldef)*
+
+    /* declarations */
+    decl:       attrs ("var" | "const" | "generic") decllist
+    attrs:      ("$noret" | "extern" | "pkglocal")*
+    decllist:   declbody ("," declbody)+
+    declbody:   declcore ["=" expr]
+    declcore:   ident [":" type]
+
+    /* traits */
+    traitdef:   "trait" ident typaram [auxtypes] ("\n" | "=" traitbody ";;")
+    auxtypes:   "->" type ("," type)*
+    traitbody:  "\n"* (ident ":" type "\n"*)*
+    impldef:    "impl" ident type [auxtypes] ("\n" | "=" implbody ";;")
+    implbody:   "\n"* (ident [":" type] "=" expr "\n"*)*
+
+    /* types */
+    tydef:      "type" typeid "=" type
+    typeid:     ident | ident "(" typarams ")"
+    typarams:   typaram ("," typaram)*
+    type:       structdef | uniondef | tupledef |
+                constructed | generic | "..."
+    structdef:  "struct" structbody ";;"
+    structbody:	declcore*
+    uniondef:   "union" unionbody ";;"
+    unionbody:	("`" ident [type])*
+    tupledef:   "(" type ("," type)* ")"
+    generic:    typaram ["::" traitlist]
+    traitlist:  name | "(" name ("," name)
+    constructed: functype | sicetype | arraytype | ptrtype | void | name
+    functype:   "(" arglist "->" type ")"
+    arglist:    [arg ("," arg)*]
+    arg:        name ":" type
+    slicetype:  type "[" ":" "]"
+    arraytype:  type "[" (expr | "...") "]"
+    ptrtype:    type "#"
+    void:       "void"
+
+    /* expressions */
+    retexpr:    "->" expr | expr
+    exprln:     expr ";"
+    expr:       lorepxr asnop expr | lorexpr
+    lorexpr:    lorexpr "||" landexpr | landexpr
+    landexpr:   landexpr "&&" cmpexpr | cmpexpr
+    cmpexpr:    cmpexpr ("<" | "<=" | "==" | ">=" | ">") borexprexpr | borexpr
+    borexpr:    borexpr ("|" | "^" ) bandexpr | bandexpr
+    bandexpr:   bandexpr "&" addexpr | addexpr
+    addexpr:    addexpr ("+" | "-") mulexpr
+    mulexpr:    mulexpr ("*" | "/" | "%") shiftexpr
+    shiftexpr:  shiftexpr ("<<" | ">>") prefixexpr
+    preexpr:    "++" prefixexpr | "--" prefixexpr |
+                "!" prefixexpr | "~" prefixexpr |
+                "-" prefixexpr | "+" prefixexpr |
+                "&" prefixexpr | postexpr
+    postexpr:   postexpr "." ident |
+                postexpr "++" | postexpr "--" |
+                postexpr "[" expr "]" |
+                postexpr "[" [expr] ":" [expr] "]" |
+                "`" name postexpr | "`" name
+                postepxr "#" |
+                atomicexpr
+
+    atomicexpr: ident | literal | "(" expr ")" | "sizeof" "(" type ")" |
+                "(" expr ":" type ")" | "impl" "(" name "," type ")"
+
+    /* literals */
+    literal:    funclit | seqlit | tuplit | simplelit
+    funclit:    "{" [funcargs] ";" blockbody "}"
+    funcargs:   ident [ ":" type] ("," ident [ ":" type])*
+    seqlit:     "[" structelts | [arrayelts] "]"
+    arrayelts:  arrayelt ("," arrayelt)*
+    arrayelt:   ";'* expr [":" expr] ";"*
+    structelts: structelt ("," ";"* structelt)*
+    structelt:  ";"* "." name "=" expr ";"*
+    tuplit:     "(" expr "," [expr ("," expr)*] ")"
+    simplelit:  strlist | chrlit | fltlit | boollit | voidlit | intlit
+    fltlit:     <float literal>
+    boollit:    "true" | "false"
+    voidlit:    "void"
+    strlit:     <string literal>
+    chrlit:     <char literal>
+
+    /* statements */
+    blkbody:    (decl | stmt | tydef | ";")*
+    stmt:       jmpstmt | flowstmt | retexpr
+    jmpstmt:    goto | break | continue | label
+    flowstmt:   ifstmt | forstmt | whilestmt | matchstmt
+
+    ifstmt:     "if" exprln blkbody elifs ["else" blkbody] ";;"
+    elifs:      ("elif" exprln blkbody)*
+    forstmt:    foriter | forstep
+    foriter:    "for" expr "in" exprln blkbody ";;"
+    forstep:    "for" exprln exprln exprln blkbody ";;"
+    whilestmt:  "while" exprln blkbody ";;"
+    matchstmt:  "match" exprln pattern* ";;"
+    pattern:      "|" expr ":" blkbody ";"
+    goto:       "goto" ident ";"
+    break:      "break" ";"
+    continue:   "continue" ";"
+    label:      ":" ident ";"
+
+    /* misc */
+    name:       ident | ident "." ident
+    asnop:      "=" | "+=" | "-=" | "*=" | "/=" | "%=" |
+                "|=" | "^=" | "&=" | "<<=" | ">>="
+
+    /* pattern tokens */
+    typaram:    /@[a-zA-Z_][a-zA-Z0-9_]*/
+    ident:      /[a-zA-Z_][a-zA-Z0-9_]*/
+
+BUGS:
+
