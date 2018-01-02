@@ -1,0 +1,11 @@
+lib iter =
+	chunk.myr
+	enum.myr
+	perm.myr
+	ref.myr
+	reverse.myr
+	zip.myr
+
+	lib ../sys:sys
+	lib ../std:std
+;;

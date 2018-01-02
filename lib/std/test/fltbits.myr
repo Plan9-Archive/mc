@@ -1,0 +1,5 @@
+use std
+
+const main = {
+	std.assert(std.isnan(std.flt64nan()), "isnan(nan) false\n")
+}

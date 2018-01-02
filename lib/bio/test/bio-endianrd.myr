@@ -1,0 +1,52 @@
+use std
+use bio
+
+const main = {
+	var b : byte
+	var w : uint16
+	var l : uint32
+	var q : uint64
+	var f
+
+	/* use the expected write data as read data */
+	match bio.open("data/bio-endianwr-expected", bio.Rd)
+	| `std.Ok bio:	f = bio
+	| `std.Err m:	std.fatal("Unable to open data file: {}\n", m)
+	;;
+	
+	/* byte */
+	b = 0xaa
+	var r = std.try(bio.getle8(f))
+	std.assert(r == b, "le byte broken: {x}\n", r)
+	std.assert(std.try(bio.getbe8(f)) == b, "be byte broken\n")
+
+	/* word */
+	w = 0xaabb
+	std.assert(std.try(bio.getle16(f)) == w, "le word broken\n")
+	std.assert(std.try(bio.getbe16(f)) == w, "be word broken\n")
+
+	/* long */
+	l = 0xaabbccdd
+	std.assert(std.try(bio.getle32(f)) == l, "le long broken\n")
+	std.assert(std.try(bio.getbe32(f)) == l, "be long broken\n")
+
+	/* quad */
+	q = (0x11223344aabbccdd : uint64)
+	std.assert(std.try(bio.getle64(f)) == q, "le quad broken\n")
+	std.assert(std.try(bio.getbe64(f)) == q, "be quad broken\n")
+
+	/* end of file */
+	match bio.getle64(f)
+	| `std.Err `bio.Eof:
+	| `std.Err _:
+		std.die("error on reading file\n")
+	| `std.Ok v:
+		std.die("read past end of file\n")
+		v = q /* shut up type inference */
+	;;
+
+	bio.close(f);
+
+	std.put("success: all reads matched\n")
+}
+

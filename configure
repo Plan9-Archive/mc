@@ -1,0 +1,145 @@
+#!/bin/sh
+
+prefix="/usr/local"
+
+while [ $# -gt 0 ]; do
+    arg=$1
+    shift
+    case "$arg" in
+        "--redo" | "-r")
+            if [ -f ./configvar_cache ]; then
+                . ./configvar_cache
+            fi
+            ;;
+        "--prefix" | "-p")
+            prefix=$1
+            shift
+            ;;
+        --prefix=*)
+            prefix=`echo $arg | sed 's/^--prefix=//g'`
+            ;;
+        "--help" | "-h")
+            echo "Usage:"
+            echo "      --prefix | -p: The prefix to install to"
+            exit
+            ;;
+        *) echo "Unrecognized argument $arg";;
+    esac
+done
+
+OS=`uname`
+MACH=`uname -m`
+
+rm -f config.mk
+rm -f config.h
+rm -f mbld/config.myr
+rm -f configvar_cache
+
+echo export INST_ROOT=$prefix >> config.mk
+
+echo "pkg config = " >> mbld/config.myr
+
+symprefix='""'
+defaultasm='Gnugaself'
+sysinit=''
+env='[][:]'
+case $OS in
+    *Linux*)
+        echo 'export SYS=linux' >> config.mk
+        echo export INST_MAN=$prefix/share/man/man >> config.mk
+        echo 'const Sys = "Linux"' >> mbld/config.myr
+        echo 'const Linkcmd = ["ld"]' >> mbld/config.myr
+        echo "const Manpath = \"share/man/man\"" >> mbld/config.myr
+        ;;
+    *Darwin*)
+	symprefix='"_"'
+	defaultasm=Gnugasmacho
+	sysinit='setenv("MACOSX_DEPLOYMENT_TARGET", "10.6", 0)'
+        echo 'export SYS=osx' >> config.mk
+        echo export INST_MAN=$prefix/share/man/man >> config.mk
+        echo export MACOSX_DEPLOYMENT_TARGET=10.6 >> config.mk
+        echo 'const Sys = "OSX"' >> mbld/config.myr
+        echo 'const Linkcmd = ["ld", ' \
+            '"-pagezero_size", "0x100000000",' \
+            '"-macosx_version_min", "10.6",'\
+            ']' >> mbld/config.myr
+        echo "const Manpath = \"share/man/man\"" >> mbld/config.myr
+	env='[("MACOSX_DEPLOYMENT_TARGET", "10.6")][:]'
+        ;;
+    *FreeBSD*)
+        echo 'export SYS=freebsd' >> config.mk
+        echo export INST_MAN=$prefix/man/man >> config.mk
+        echo 'const Sys = "FreeBSD"' >> mbld/config.myr
+        echo 'const Linkcmd = ["ld"]' >> mbld/config.myr
+        echo "const Manpath = \"man/man\"" >> mbld/config.myr
+        ;;
+    *NetBSD*)
+        echo 'export SYS=netbsd' >> config.mk
+        echo export INST_MAN=$prefix/man/man >> config.mk
+        echo 'const Sys = "NetBSD"' >> mbld/config.myr
+        echo 'const Linkcmd = ["ld"]' >> mbld/config.myr
+        echo "const Manpath = \"man/man\"" >> mbld/config.myr
+        ;;
+    *OpenBSD*)
+        echo 'export SYS=openbsd' >> config.mk
+        echo export INST_MAN=$prefix/man/man >> config.mk
+        echo 'const Sys = "OpenBSD"' >> mbld/config.myr
+        echo 'const Linkcmd = ["ld", "-static", "-nopie"]' >> mbld/config.myr
+        echo "const Manpath = \"man/man\"" >> mbld/config.myr
+        ;;
+    *)
+        echo ''
+        echo '********************************'
+        echo 'Unknown system '$OS
+        echo 'Cannot build'
+        echo '********************************'
+        rm -f config.h config.mk
+        exit 1
+        ;;
+esac
+
+# config.h
+echo '#define Instroot "'$prefix'"' >> config.h
+echo '#define Asmcmd {"as", "-o", NULL}' >> config.h
+echo '#define Objsuffix ".o"' >> config.h
+echo 'export SYSCLASS=posixy' >> config.mk
+echo '#define Symprefix' $symprefix >> config.h
+echo '#define Defaultasm' $defaultasm >> config.h
+echo '#define Sysinit ' $sysinit >> config.h
+
+# mbld mbld/config.myr
+echo "const Instroot = \"$prefix\"" >> mbld/config.myr
+echo "const Objsuffix = \".o\"" >> mbld/config.myr
+echo "const Arcmd = [\"ar\", \"-rcs\"]" >> mbld/config.myr
+echo "const Ascmd = [\"as\", \"-g\"]" >> mbld/config.myr
+echo "const Directlib = false" >> mbld/config.myr
+echo "const Runtime = \"_myrrt.o\"" >> mbld/config.myr
+
+# paths to install to
+echo "const Sharepath = \"share\"" >> mbld/config.myr
+echo "const Binpath = \"bin\"" >> mbld/config.myr
+echo "const Libpath = \"lib/myr\"" >> mbld/config.myr
+echo "const Env : (byte[:], byte[:])[:] = $env" >> mbld/config.myr
+
+
+case $MACH in
+    *x86_64* | *amd64*)
+	echo 'export ARCH=x64' >> config.mk
+        echo 'const Arch = "x64"' >> mbld/config.myr
+        ;;
+    *)
+        echo ''
+        echo '********************************'
+        echo 'Unknown arch '$MACH
+        echo 'Cannot build'
+        echo '********************************'
+	;;
+esac
+
+echo ';;' >> mbld/config.myr
+
+echo "prefix=$prefix" > configvar_cache
+cat << EOF
+    Building with:
+        prefix=$prefix
+EOF

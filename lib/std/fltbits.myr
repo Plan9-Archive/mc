@@ -1,0 +1,110 @@
+pkg std =
+	const flt64bits	: (flt : flt64 -> int64)
+	const flt32bits	: (flt : flt32 -> int32)
+	const flt64inf	: (-> flt64)
+	const flt64nan	: (-> flt64)
+	const flt32inf	: (-> flt32)
+	const flt32nan	: (-> flt32)
+
+	generic isnan		: (f : @a -> bool) ::floating @a
+	const flt64frombits	: (bits : uint64 -> flt64)
+	const flt32frombits	: (bits : uint32 -> flt32)
+	const flt64explode	: (flt : flt64 -> (bool, int64, int64))
+	const flt32explode	: (flt : flt32 -> (bool, int32, int32))
+	const flt64assem	: (sign : bool, mant : int64, exp : int64 -> flt64)
+	const flt32assem	: (sign : bool, mant : int32, exp : int32 -> flt32)
+;;
+
+const flt64bits	= {flt;	-> (&flt : int64#)#}
+const flt32bits	= {flt;	-> (&flt : int32#)#}
+const flt64frombits	= {bits;	-> (&bits : flt64#)#}
+const flt32frombits	= {bits;	-> (&bits : flt32#)#}
+
+const flt64explode = {flt
+	var bits, isneg, mant, exp
+
+	bits = flt64bits(flt)
+	isneg = (bits >> 63) != 0 	/* msb is sign bit */
+	exp = (bits >> 52) & 0x7ff 	/* exp is in bits [52..63] */
+	mant = bits & ((1l << 52) - 1)	/* msb is in bits [..51] */
+
+	/* add back the implicit bit if this is not a denormal */
+	if exp != 0
+		mant |= 1l << 52
+	else
+		exp = 1
+	;;
+	/*
+	   adjust for exponent bias. nb: because we are
+	   treating the mantissa as m.0 instead of 0.m,
+	   our exponent bias needs to be offset by the
+	   size of m
+	*/
+	-> (isneg, mant, exp)
+}
+
+const flt32explode = {flt
+	var bits, isneg, mant, exp
+
+	bits = flt32bits(flt)
+	isneg = (bits >> 31) != 0 	/* msb is sign bit */
+	exp = (bits >> 23) & 0xff	/* exp is in bits [23..30] */
+	mant = bits & ((1 << 23) - 1)	/* msb is in bits [0..22] */
+
+	/* add back the implicit bit if this is not a denormal */
+	if exp != 0
+		mant |= 1 << 23
+	else
+		exp = 1
+	;;
+	/*
+	   adjust for exponent bias. nb: because we are
+	   treating the mantissa as m.0 instead of 0.m,
+	   our exponent bias needs to be offset by the
+	   size of m
+	*/
+	-> (isneg, mant, exp)
+}
+
+const flt64assem = {sign, mant, exp
+	var s, m, e
+
+	s = (sign : uint64)
+	e = (exp : uint64) & 0x7ff
+	m = (mant : uint64) & ((1ul<<52) - 1)
+	-> std.flt64frombits((s << 63) | (e << 52) | m)
+}
+
+const flt32assem = {sign, mant, exp
+	var s, m, e
+
+	s = (sign : uint32)
+	e = (exp : uint32) & 0xff
+	m = (mant : uint32) & ((1<<22) - 1)
+	-> std.flt32frombits(s << 31 | e << 22 | m)
+
+}
+
+generic isnan = {f
+	var b
+
+	b = flt64bits((f : flt64))
+	-> (b >> 52) & 0x7ffl == 0x7ffl && \
+		b & ~(0x7ffl) != 0
+}
+
+const flt64inf = {
+	-> std.flt64frombits(0x7ff0000000000000ul)
+}
+
+const flt64nan = {
+	-> std.flt64frombits(0x7ff8000000000000ul)
+}
+
+const flt32inf = {
+	-> std.flt32frombits(0x7f800000)
+}
+
+const flt32nan = {
+	-> std.flt32frombits(0x7fc00000)
+}

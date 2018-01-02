@@ -1,0 +1,36 @@
+</$objtype/mkfile
+CC=pcc
+LD=pcc
+CFLAGS=-c -D_POSIX_SOURCE -D_SUSV2_SOURCE -D_C99_SNPRINTF_EXTENSION -I../util
+
+LIB=libparse.a
+OFILES= \
+	dump.$O \
+	err.$O \
+	export.$O \
+	fold.$O \
+	gram.$O \
+	infer.$O \
+	names.$O \
+	node.$O \
+	specialize.$O \
+	stab.$O \
+	tok.$O \
+	type.$O \
+	use.$O \
+
+HFILES=parse.h ../util/util.h ../config.h gram.h
+CLEANFILES=gram.c gram.h
+
+</sys/src/cmd/mklib
+
+install:V: $LIB
+	touch $LIB
+
+uninstall:V:
+	echo nothing to uninstall
+
+gram.c gram.h: gram.y
+	yacc -d -S gram.y
+	mv y.tab.c gram.c
+	mv y.tab.h gram.h
