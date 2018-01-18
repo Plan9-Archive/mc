@@ -1,0 +1,176 @@
+use "die"
+use "extremum"
+use "memops"
+use "syswrap"
+use "threadhooks"
+use "types"
+use "units"
+use "bytealloc"
+use "backtrace"
+use "memops"
+
+/*
+The allocator implementation here is based on Bonwick's slab allocator.
+
+For small allocations (up to Bktmax), it works by requesting large,
+power of two aligned chunks from the operating system, and breaking
+them into a linked list of equal sized chunks. Allocations are then
+satisfied by taking the head of the list of chunks. Empty slabs
+are removed from the freelist.
+
+The data structure looks something like this:
+   Bkts:
+	[16  byte] -> [slab hdr | chunk -> chunk -> chunk] -> [slab hdr | chunk -> chunk -> chunk]
+	[32  byte] -> Zslab
+	[64  byte] -> [slab hdr | chunk -> chunk]
+	...
+	[32k byte] -> ...
+
+Large allocations are simply satisfied by mmap().
+
+*/
+
+pkg std =
+	generic alloc		: ( -> @a#)
+	generic zalloc		: ( -> @a#)
+	generic free		: (v:@a# -> void)
+
+	generic slalloc		: (len : size -> @a[:])
+	generic slzalloc	: (len : size -> @a[:])
+	generic slgrow		: (sl : @a[:]#, len : size -> @a[:])
+	generic slzgrow		: (sl : @a[:]#, len : size -> @a[:])
+	generic slfree		: (sl : @a[:] -> void)
+;;
+
+type slheader = struct
+	cap	: size	/* capacity in bytes */
+	magic	: size	/* magic check value */
+;;
+
+/* Allocates an object of type @a, returning a pointer to it. */
+generic alloc = {-> @a#
+	-> (bytealloc(sizeof(@a)) : @a#)
+}
+
+generic zalloc = {-> @a#
+	-> (zbytealloc(sizeof(@a)) : @a#)
+}
+
+/* Frees a value of type @a */
+generic free = {v:@a# -> void
+	bytefree((v : byte#), sizeof(@a))
+}
+
+/* allocates a slice of 'len' elements. */
+generic slalloc = {len
+	var p, sz
+
+	if len == 0
+		-> [][:]
+	;;
+	sz = len*sizeof(@a) + align(sizeof(slheader), Align)
+	p = bytealloc(sz)
+	p = inithdr(p, sz)
+	-> (p : @a#)[0:len]
+}
+
+generic slzalloc = {len
+	var p, sz
+
+	if len == 0
+		-> [][:]
+	;;
+	sz = len*sizeof(@a) + align(sizeof(slheader), Align)
+	p = zbytealloc(sz)
+	p = inithdr(p, sz)
+	-> (p : @a#)[0:len]
+}
+
+const inithdr = {p, sz
+	var phdr, prest
+
+	phdr = (p : slheader#)
+	phdr.cap = allocsz(sz) - align(sizeof(slheader), Align)
+	phdr.magic = (0xdeadbeefbadf00d : size)
+
+	prest = (p : size) + align(sizeof(slheader), Align)
+	-> (prest : byte#)
+}
+
+const checkhdr = {p
+	var phdr, addr
+
+	addr = (p : size)
+	addr -= align(sizeof(slheader), Align)
+	phdr = (addr : slheader#)
+	iassert(phdr.magic == (0xdeadbeefbadf00d : size), "corrupt memory\n")
+}
+
+/* Frees a slice */
+generic slfree	 = {sl
+	var head
+
+	if (sl : byte#) == Zsliceptr
+		-> void
+	;;
+
+	checkhdr((sl : byte#))
+	head = ((sl : byte#) : size)
+	head -= align(sizeof(slheader), Align)
+	bytefree((head : byte#), slcap((sl : byte#)))
+}
+
+/* Grows a slice */
+generic slgrow = {sl : @a[:]#, len
+	var cap
+	var new
+	var n
+
+	/* if the slice doesn't need a bigger bucket, we don't need to realloc. */
+	cap = 0
+	if (sl# : byte#) != Zsliceptr
+		cap = slcap((sl# : byte#))
+	;;
+	if cap >= allocsz(len*sizeof(@a))
+		sl# = (sl# : @a#)[:len]
+		-> sl#
+	;;
+
+	/* grow in factors of 1.5 */
+	cap = max(Align, cap)
+	while cap < len
+		cap += (cap >> 1)
+	;;
+
+	new = slalloc(cap)
+	n = min(len, sl#.len)
+	memblit((new : byte#), (sl# : byte#), n * sizeof(@a))
+	if sl#.len > 0
+		slfree(sl#)
+	;;
+	sl# = new[:len]
+	-> sl#
+}
+
+/* Grows a slice, filling new entries with zero bytes */
+generic slzgrow = {sl : @a[:]#, len
+	var oldlen
+	var base
+
+	oldlen = sl#.len
+	slgrow(sl, len)
+	base = ((sl# : byte#) : intptr)
+	if oldlen < len
+		memfill((sl#[oldlen:] : byte#), 0, (len - oldlen)*sizeof(@a))
+	;;
+	-> sl#
+}
+
+const slcap = {p
+	var phdr
+
+	phdr = ((p : size) - align(sizeof(slheader), Align) : slheader#)
+	std.iassert(phdr.magic == (0xdeadbeefbadf00d : size), "corrupt memory\n")
+	-> phdr.cap
+}
+

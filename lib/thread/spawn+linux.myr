@@ -1,0 +1,76 @@
+use sys
+use std
+
+pkg thread =
+	type tid = sys.pid
+
+	const spawn : (fn : (-> void) -> std.result(tid, byte[:]))
+;;
+
+extern const exit : (-> void)
+
+/* Holy shit flag mania. */
+const Thrflag = sys.Clonevm | sys.Clonefs | sys.Clonefiles  | \
+	sys.Clonesighand | sys.Clonethread |sys.Clonesysvsem | \
+	sys.Clonesettls | sys.Cloneparentsettid | sys.Clonechildcleartid
+
+const Stacksz = 8*std.MiB
+
+const spawn = {fn
+	-> spawnstk(fn, Stacksz)
+}
+
+const spawnstk = {fn, sz
+	var stk : byte#, tid, ctid, ret
+
+	stk = getstk(sz)
+	if stk == sys.Mapbad
+		-> `std.Err "couldn't get stack"
+	;;
+	stk = initstack(stk, fn, Stacksz)
+
+	ret = sys.fnclone(Thrflag, \
+		(stk : byte#),\
+		&tid, (0 : byte#), \
+		&ctid, (0 : byte#), \
+		(startthread : void#))
+	if ret < 0
+		-> `std.Err "couldn't spawn thread"
+	;;
+	-> `std.Ok (ret : tid)
+}
+
+const initstack = {stk, fn, sz
+	var tos, szp, fp, env, envsz
+
+	envsz = std.fnenvsz(fn)
+	tos = (stk : std.intptr)
+	tos -= sizeof(int64)
+	szp = (tos : sys.size#)
+	szp# = sz
+	tos -= (envsz : std.intptr)
+	env = tos
+	tos -= sizeof((->void))
+	fp = (tos : (->void)#)
+	fp# = std.fnbdup(fn, (env : byte#)[:envsz])
+	-> (tos : byte#)
+}
+
+const getstk = {sz
+	var p, m
+
+	p = sys.mmap((0 : byte#), sz, sys.Mprotrw, sys.Mpriv | sys.Manon, -1, 0)
+	if p == sys.Mapbad
+		-> p
+	;;
+	/* stack starts at the top of memory and grows down. */
+	m = (p : std.intptr)
+	m += (sz : std.intptr)
+	-> (m : byte#)
+}
+
+const startthread = {fn : (-> void)
+	fn()
+	exit()
+}
+

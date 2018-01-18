@@ -1,0 +1,80 @@
+use std
+
+use "loopcheck"
+
+pkg fileutil =
+	type walkiter = struct
+		dirstk	: std.dir#[:]
+		curdir	: byte[:][:]
+		loopck	: loopcheck
+	;;
+
+	impl iterable walkiter -> byte[:]
+	const bywalk	: (dir : byte[:] -> walkiter)
+;;
+
+const bywalk = {p
+	match std.diropen(p)
+	| `std.Ok d:
+		-> [
+			.dirstk = std.sldup([d][:]),
+			.curdir = std.sldup([std.sldup(p)][:]),
+			.loopck = mkloopcheck(p),
+		]
+	| `std.Err e:
+		-> [
+			.dirstk = [][:],
+			.curdir = [][:],
+			.loopck = mkloopcheck(p),
+		]
+	;;
+}
+
+impl iterable walkiter -> byte[:] =
+	__iternext__ = {itp, valp
+		var cur, p
+
+:nextfile
+		if itp.dirstk.len < 1
+			freeloopcheck(itp.loopck)
+			-> false
+		;;
+		cur = itp.dirstk[itp.dirstk.len - 1]
+		match std.dirread(cur)
+		| `std.Some ".":	goto nextfile
+		| `std.Some "..":	goto nextfile
+		| `std.Some ent:
+			p = std.pathcat(itp.curdir[itp.curdir.len - 1], ent)
+			if looped(itp.loopck, p)
+				std.slfree(p)
+				goto nextfile
+			;;
+			if std.fisdir(p)
+				match std.diropen(p)
+				| `std.Ok d:
+					std.slpush(&itp.dirstk, d)
+					std.slpush(&itp.curdir, p)
+				| `std.Err e:	/* ? */
+					std.slfree(p)
+				;;
+				goto nextfile
+			;;
+			valp# = p
+			-> true
+		| `std.None:
+			std.dirclose(cur)
+			std.slfree(itp.curdir[itp.curdir.len - 1])
+			std.slpop(&itp.curdir)
+			std.slpop(&itp.dirstk)
+			goto nextfile
+		;;
+	}
+
+	__iterfin__ = {itp, valp
+		std.slfree(valp#)
+	}
+;;
+
+generic last = {sl : @a[:]
+	-> sl[sl.len - 1]
+}

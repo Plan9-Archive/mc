@@ -1,0 +1,18 @@
+lib bio = 
+	bio.myr
+	geti.myr
+	puti.myr
+	iter.myr
+	types.myr
+
+	# backends
+	fd.myr
+	mem.myr
+
+        lib ../std:std
+        lib ../sys:sys
+;;
+
+sub =
+	test
+;;
