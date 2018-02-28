@@ -1,0 +1,133 @@
+use std
+
+pkg bld =
+	type build = struct
+		/* build state */
+		basedir	: byte[:]
+		tags	: std.htab(byte[:], (int, int, int))#
+		libs	: std.htab(byte[:], libdep#)#
+		deps	: depgraph#
+
+		/* in flight builds */
+		queue	: node#[:]
+		proc	: std.htab(std.pid, node#)#
+		fail	: bool
+
+		/* build params */
+		all	: byte[:][:]
+		targs	: std.htab(byte[:], targ)#
+		prefix	: byte[:]
+		system	: byte[:]
+		arch	: byte[:]
+
+	;;
+
+	type targ = union
+		`Bin	myrtarg#
+		`Lib	myrtarg#
+		`Gen	cmdtarg#
+		`Cmd	cmdtarg#
+		`Man	mantarg#
+		`Data	datatarg#
+	;;
+
+	type myrtarg = struct
+		name	: byte[:]
+		dir	: byte[:]
+
+		inputs	: byte[:][:]
+		/* dir, lib, targname */
+		libdeps	: (byte[:], byte[:], byte[:])[:]
+		tstdeps	: (byte[:], byte[:], byte[:])[:]
+		runtime	: byte[:]
+		incpath	: byte[:][:]
+		tags	: byte[:][:]
+		ldscript	: byte[:]
+
+		islib	: bool
+		istest	: bool
+		isbench	: bool
+		isdyn	: bool
+		install	: bool
+
+	;;
+
+	type cmdtarg = struct
+		dir	: byte[:]
+		gen	: byte[:][:]
+		cmd	: byte[:][:] 
+		deps	: byte[:][:] 
+		tags	: byte[:][:]
+		durable	: bool
+		istest	: bool
+		isbench	: bool
+	;;
+
+	type mantarg = struct
+		dir	: byte[:]
+		tags	: byte[:][:]
+		pages	: byte[:][:]
+	;;
+
+	type datatarg = struct
+		dir	: byte[:]
+		name	: byte[:]
+		tags	: byte[:][:]
+		path	: byte[:]
+		blobs	: byte[:][:]
+	;;
+
+	type libdep = struct
+		dir	: byte[:]
+		name	: byte[:]
+		dep	: byte[:][:]
+		dyndep	: byte[:][:]
+		genuse	: byte[:]
+		genar	: byte[:]
+		mtime	: std.time
+	;;
+
+	type testresult = union
+		`Skip
+		`Pass
+		`Fail byte[:]
+		`Timing (int, flt64, flt64)
+	;;
+
+	type depgraph = struct
+		/* the edges of the graph from both ends */
+		targs	: std.htab(byte[:], node#[:])#
+		gen	: std.htab(byte[:], node#)#
+
+		nodes	: node#[:]
+		leaves	: node#[:]
+	;;
+
+	type node = struct
+		/* for debugging, "primary output" */
+		lbl	: byte[:]
+
+		/* run this command in this dir to 'execute' the node */
+		cmd	: byte[:][:]
+		wdir	: byte[:]
+
+		/* install info */
+		instdir	: byte[:]
+		instmod	: int64
+
+		/* dependency names */
+		gen	: byte[:][:]
+		dep	: byte[:][:]
+		deptime	: std.time
+
+		/* resolved dependency nodes */
+		ndep	: node#[:]
+		ngen	: node#[:]
+
+		/* build state */
+		nblock	: int32
+		mtime	: std.time
+		durable	: bool	/* keep outputs when cleaning */
+		want	: bool
+	;;
+;;

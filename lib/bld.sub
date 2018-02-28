@@ -1,0 +1,17 @@
+sub =
+	bio
+	crypto
+	date
+	escfmt
+	fileutil
+	http
+	inifile
+	iter
+	json
+	math
+	regex
+	std
+	sys
+	testr
+	thread
+;;

@@ -1,0 +1,16 @@
+use std
+
+const main = {
+	var fn, envfn
+	var ptr
+	
+	fn = {
+	}
+	envfn = {
+		ptr = ptr
+	}
+	ptr = (fn : byte#)
+	ptr = (envfn : byte#)
+	std.put("ok\n")
+}
+

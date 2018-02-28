@@ -1,0 +1,122 @@
+use std
+use bio
+use regex
+
+const main = {args
+	var cmd, comp
+	var verbose
+	var fd
+
+	verbose = false
+	cmd = std.optparse(args, &[
+		.argdesc = "regex [inputs...]",
+		.minargs = 1,
+		.opts = [
+			[.opt='v', .desc="dump verbose regex output"]
+		][:],
+	])
+	for opt : cmd.opts
+		match opt
+		| ('v', _):	verbose = true
+		| _:	std.fatal("Unknown argument")
+		;;
+	;;
+	if verbose
+		comp = regex.dbgcompile(cmd.args[0], true)
+	else
+		comp = regex.dbgcompile(cmd.args[0], false)
+	;;
+	match comp
+	| `std.Err m:	
+		std.fatal("unable to compile regex: {}\n", m)
+	| `std.Ok re:
+		if cmd.args.len > 1
+			runall(re, cmd.args)
+		else
+			fd = bio.mkfile(0, bio.Rd)
+			dump(re, fd)
+			bio.close(fd)
+		;;
+	;;
+}
+
+const runall = {re, files
+
+	for f : files
+		match bio.open(f, bio.Rd)
+		| `std.Ok fd:
+			dump(re, fd)
+			bio.close(fd)
+		| `std.Err m:
+			std.fatal("failed to open {}: {}\n", f, m)
+		;;
+	;;
+}
+
+const dump = {re, fd 
+	while true
+		match bio.readln(fd)
+		| `std.Ok ln:
+			show(re, ln, regex.exec(re, ln))
+			std.slfree(ln)
+		| `std.Err `bio.Eof:
+			break
+		| `std.Err e:
+			std.put("error reading from input: {}", e)
+			break
+		;;
+	;;
+}
+
+const show = {re, ln, mg
+	match mg
+	| `std.Some rl:
+		std.put("Matched: {}\n", rl[0])
+		for var i = 1; i < rl.len; i++
+			std.put("\tgroup {}: {}\n", i, rl[i])
+		;;
+		std.put("coverage:\n")
+		std.put("\t{}\n", re.pat)
+		showcoverage(re)
+	| `std.None:
+		std.put("Match failed at {}:\n", re.lastip)
+		std.put("\t{}\n", re.pat)
+		caret(re, re.pcidx[re.lastip])
+		std.put("\t{}\n", ln)
+		caret(re, re.strp - 1)
+	;;
+}
+
+const caret = {re, idx
+	std.put("\t")
+	for var i = 0; i < idx; i++
+		std.put("~")
+	;;
+	std.put("^\n")
+}
+
+const showcoverage = {re
+	var hit
+	var idx
+
+	hit = std.slzalloc(re.pat.len)
+	for var ip = 0; ip < re.proglen; ip++
+		if !std.bshas(re.traces[re.lastthr], ip)
+			continue
+		;;
+		idx = re.pcidx[ip]
+		if idx >= 0 && idx < hit.len
+			hit[idx] = true
+		;;
+	;;
+
+	std.put("\t")
+	for h : hit
+		if h
+			std.put("^")
+		else
+			std.put(" ")
+		;;
+	;;
+	std.put("\n")
+}

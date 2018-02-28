@@ -1,0 +1,96 @@
+use std
+
+pkg iter =
+	type permiter(@a) = struct
+		cmp	: (a : @a, b : @a -> std.order)
+		seq	: @a[:]
+		first	: bool
+	;;
+
+	impl iterable permiter(@a) -> @a[:]
+	generic byperm	: (a : @a[:], cmp : (a : @a, b : @a -> std.order) -> permiter(@a))
+;;
+
+generic byperm = {a, cmp
+	/* start off by backwards-sorting a */
+	std.sort(a, cmp)
+
+	-> [.cmp = cmp, .seq = std.sort(a, cmp), .first = true]
+}
+
+/*
+  Generates all permutations of a sequence in place,
+  mutating the sequence passed in the iterator.
+ */
+impl iterable permiter(@a) -> @a[:] =
+	__iternext__ = {itp, valp
+		var j : std.size = seq.len - 1
+		var i : std.size = seq.len - 1
+		var seq : @a[:] = itp.seq
+
+		valp# = itp.seq
+
+		if itp.first
+			itp.first = false
+			-> true
+		;;
+
+		/*
+		  To generate the next permutation, we need
+		  to increase the sequence by as little as
+		  possible. That means that we start by finding
+		  the longest monotonically decreasing trailing
+		  sequence.
+		 */
+		j = seq.len - 1
+		while true
+			if j == 0
+				-> false
+			;;
+			j--
+			match itp.cmp(seq[j], seq[j + 1])
+			| `std.Before: break
+			| _:
+			;;
+		;;
+
+		/* 
+		  Find highest i s.t. seq[j] < seq[i]. This
+		  is the index that will maintain the order of
+		  the suffix, while increasing the value of the
+		  element in the 'pivot'.
+		 */
+		i = seq.len - 1
+		while true
+			/*
+			  By the previous loop, we know that
+			  seq[j] < seg[j + 1], thus, in this loop,
+			  we always have j + 1 <= i, and the array
+			  accesses are always in bounds.
+			*/
+			match itp.cmp(seq[j], seq[i])
+			| `std.Before: break
+			| _: i--
+			;;
+		;;
+
+		/*
+		  Then, swap seq[i] and seq[j] and reverse the
+		  sequence. Because the suffix was in decreasing
+		  order, reversing it means that our sequence is
+		  now in increasing order: ie, our most significant
+		  place has the smallest value.
+		 */
+		std.swap(&seq[i], &seq[j])
+		i = 1
+		while j + i < seq.len - i
+			std.swap(&seq[j + i], &seq[seq.len - i])
+			i++
+		;;
+
+		-> true
+	}
+
+	__iterfin__ = {itp, valp
+	}
+;;
