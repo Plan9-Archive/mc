@@ -1,0 +1,62 @@
+use std
+
+use "bio"
+use "types"
+
+pkg bio =
+	/* unsigned big endian */
+	generic getbe8	: (f : file# -> std.result(@a, err)) :: numeric,integral @a
+	generic getbe16	: (f : file# -> std.result(@a, err)) :: numeric,integral @a
+	generic getbe32	: (f : file# -> std.result(@a, err)) :: numeric,integral @a
+	generic getbe64	: (f : file# -> std.result(@a, err)) :: numeric,integral @a
+
+	/* signed big endian */
+	generic getle8	: (f : file# -> std.result(@a, err)) :: numeric,integral @a
+	generic getle16	: (f : file# -> std.result(@a, err)) :: numeric,integral @a
+	generic getle32	: (f : file# -> std.result(@a, err)) :: numeric,integral @a
+	generic getle64	: (f : file# -> std.result(@a, err)) :: numeric,integral @a
+;;
+
+/*
+  reads a single integer-like value to the output stream, in
+  little endian format
+*/
+generic getle = {f, n -> std.result(@a, err) :: numeric,integral @a
+	match ensureread(f, n)
+	| `std.Err e :	-> `std.Err e
+	| `std.Ok _:
+		var v = 0
+		for var i = 0; i < n; i++
+			v |= (f.rbuf[f.rstart++] : uint64) << (8*(i : uint64))
+		;;
+		-> `std.Ok (v : @a)
+	;;
+}
+
+/*
+  reads a single integer-like value to the output stream, in
+  big endian format
+*/
+generic getbe = {f, n -> std.result(@a, err) :: numeric,integral @a
+	match ensureread(f, n)
+	| `std.Err e :	-> `std.Err e
+	| `std.Ok _:
+		var v = 0
+		for var i = 0; i < n; i++
+			v <<= 8
+			v |= (f.rbuf[f.rstart++] : uint64)
+		;;
+		-> `std.Ok (v : @a)
+	;;
+}
+
+generic getbe8  = {f; -> getbe(f, 1)}
+generic getbe16 = {f; -> getbe(f, 2)}
+generic getbe32 = {f; -> getbe(f, 4)}
+generic getbe64 = {f; -> getbe(f, 8)}
+
+generic getle8  = {f; -> getle(f, 1)}
+generic getle16 = {f; -> getle(f, 2)}
+generic getle32 = {f; -> getle(f, 4)}
+generic getle64 = {f; -> getle(f, 8)}
+

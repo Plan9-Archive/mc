@@ -1,0 +1,66 @@
+use std
+
+use "config"
+use "opts"
+use "types"
+use "util"
+use "build"
+
+pkg bld =
+	const install	: (p : build#	-> bool)
+	const uninstall	: (p : build#	-> bool)
+;;
+
+const install = {b
+	-> buildtarg(b, "all") && movetargs(b, false)
+}
+
+const uninstall = {b
+	-> movetargs(b, true)
+}
+
+const movetargs = {b, rm
+	var inst
+
+	inst = std.htgetv(b.deps.targs, "all", [][:])
+	for n : inst
+		if n.instdir.len == 0
+			continue
+		;;
+		for g : n.gen
+			if !movefile(b, rm, g, n.instdir, n.instmod)
+				-> false
+			;;
+		;;
+	;;
+	-> true
+
+}
+
+const movefile = {b, rm, file, prefix, perm
+	var path, ok
+
+	ok = true
+	path = std.pathjoin([opt_destdir, opt_instbase, prefix, std.basename(file)][:])
+	if rm
+		mbldput("\trm {}\n", path)
+		if !std.remove(path)
+			mbldput("\t\tno such file {}\n", file)
+		;;
+	else
+		std.remove(path)
+		std.mkpath(std.dirname(path))
+		match std.slurp(file)
+		| `std.Err m:	std.fatal("could not open {} for reading\n", file)
+		| `std.Ok buf:
+			mbldput("\t{} => {}\n", file, path)
+			if !std.blat(path, buf, perm)
+				mbldput("could not write {}\n", file)
+				ok = false
+			;;
+		;;
+	;;
+	std.slfree(path)
+	-> ok
+}
+
