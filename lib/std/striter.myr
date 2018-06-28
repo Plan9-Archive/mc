@@ -1,0 +1,135 @@
+use "die"
+use "types"
+use "utf"
+use "strfind"
+use "option"
+use "chartype"
+
+pkg std =
+	type chariter = struct
+		rest	: byte[:]
+	;;
+
+	type charoffiter = struct
+		str	: byte[:]
+		idx	: size
+	;;
+
+	type splititer = struct
+		rest	: byte[:]
+		split	: byte[:]
+	;;
+
+	type tokiter = struct
+		str	: byte[:]
+		idx	: size
+	;;
+
+	impl iterable chariter	-> char
+	impl iterable charoffiter	-> (char, size)
+	impl iterable splititer -> byte[:]
+	impl iterable tokiter -> byte[:]
+
+	const bychar	: (str : byte[:] -> chariter)
+	const bycharoff	: (str : byte[:] -> charoffiter)
+	const bysplit	: (str : byte[:], split : byte[:] -> splititer)
+	const bytok	: (str : byte[:] -> tokiter)
+;;
+
+impl iterable chariter -> char =
+	__iternext__ = {ci, c
+		if ci.rest.len == 0
+			-> false
+		;;
+		(c#, ci.rest) = charstep(ci.rest)
+		-> true
+	}
+
+	__iterfin__ = {ci, c
+	}
+;;
+
+const bychar = {str
+	-> [.rest = str]
+}
+
+
+impl iterable charoffiter -> (char, size) = 
+	__iternext__ = {ci, cv
+		var c
+
+		if ci.idx == ci.str.len
+			-> false
+		;;
+		c = std.decode(ci.str[ci.idx:])
+		ci.idx += std.charlen(c)
+		cv# = (c, ci.idx)
+		-> true
+	}
+
+	__iterfin__ = {ci, c
+	}
+;;
+
+const bycharoff = {s
+	-> [.str=s, .idx=0]
+}
+
+impl iterable splititer -> byte[:] =
+	__iternext__ = {si, sp
+		match std.strfind(si.rest, si.split)
+		| `Some off:
+			sp# = si.rest[:off]
+			si.rest = si.rest[off + si.split.len:]
+			-> true
+		| `None:
+			if si.rest.len > 0
+				sp# = si.rest
+				si.rest = ""
+				-> true
+			;;
+		;;
+		-> false
+	}
+
+	__iterfin__ = {ci, c
+	}
+;;
+
+const bysplit = {str, split
+	-> [.rest = str, .split = split]
+}
+
+impl iterable tokiter -> byte[:] =
+	__iternext__ = {it, sp
+		var s, lo, hi, c
+		
+		s = it.str
+		lo = it.idx
+		while lo < s.len
+			c = std.decode(s[lo:])
+			if !isspace(c)
+				break
+			;;
+			lo += charlen(c)
+		;;
+		hi = lo
+		while hi < s.len
+			c = std.decode(s[hi:])
+			if isspace(c)
+				break
+			;;
+			hi += charlen(c)
+		;;
+		it.idx = hi
+		sp# = s[lo:hi]
+		-> hi > lo
+	}
+
+	__iterfin__ = {ci, c
+	}
+;;
+
+const bytok = {str
+	-> [.str = str, .idx = 0]
+}

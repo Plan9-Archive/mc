@@ -1,0 +1,38 @@
+use std
+use bio
+
+const main = {
+	var b : byte
+	var w : uint16
+	var l : uint32
+	var q : uint64
+	var f
+
+	match bio.create("data/out-endianwr", bio.Wr, 0o644)
+	| `std.Ok bio:	f = bio
+	| `std.Err m:	std.fatal("Unable to open data file: {}\n", m)
+	;;
+	
+	/* byte */
+	b = 0xaa
+	bio.putle8(f, b)
+	bio.putbe8(f, b)
+
+	/* word */
+	w = 0xaabb
+	bio.putle16(f, w)
+	bio.putbe16(f, w)
+
+	/* long */
+	l = 0xaabbccdd
+	bio.putle32(f, l)
+	bio.putbe32(f, l)
+
+	/* quad */
+	q = (0x11223344aabbccdd : uint64)
+	bio.putle64(f, q)
+	bio.putbe64(f, q)
+
+	/* and test for flush on close */
+	bio.close(f);
+}

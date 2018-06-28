@@ -1,0 +1,80 @@
+use std
+use sys
+
+pkg thread =
+	type tid = uint64
+
+	const spawn : (fn : (-> void) -> std.result(tid, byte[:]))
+	pkglocal var exitstk : byte#
+;;
+
+const Stacksz = 8*std.MiB
+extern const exit : (-> void)
+
+var exitstk
+const __init__ = {
+	/* 
+	  We need a valid stack at all times, so we allocate one ahead of
+	  time to swap to before we invalidate a stack.
+	 */
+	exitstk = getstk(16)
+}
+
+const spawn = {fn;
+	-> spawnstk(fn, Stacksz)
+}
+
+const spawnstk = {fn, sz
+	var stk, szp, fp, tos, tfp, env, envsz
+	var ret
+
+	stk = getstk(sz)
+	if stk == sys.Mapbad
+		-> `std.Err "couldn't get stack"
+	;;
+	/* store size */
+	tos = (stk : std.intptr)
+	tos -= sizeof(int64)
+	szp = (tos : sys.size#)
+	szp# = Stacksz
+
+	/* store func */
+	envsz = std.fnenvsz(fn)
+	tos -= (envsz : std.intptr)
+	env = tos
+	tos -= sizeof((->void))
+	fp = (tos : (->void)#)
+	fp# = std.fnbdup(fn, (env : byte#)[:envsz])
+
+	tfp = [
+		.tcb = (0 : void#),
+		.tid = &ret,
+		.stk = (tos : byte#),
+	]
+	ret = sys.__tfork_thread(&tfp,
+		sizeof(sys.tforkparams),
+		(startthread : void#),
+		(0 : void#))
+	if ret < 0
+		-> `std.Err "couldn't spawn thread"
+	;;
+	-> `std.Ok (ret : tid)
+}
+
+const getstk = {sz
+	var p, m
+
+	p = sys.mmap((0 : byte#), sz, sys.Mprotrw, sys.Mpriv | sys.Manon | sys.Mstack, -1, 0)
+	if p == sys.Mapbad
+		-> p
+	;;
+	/* stack starts at the top of memory and grows down. */
+	m = (p : std.intptr)
+	m += (sz : std.intptr)
+	-> (m : byte#)
+}
+
+const startthread = {fn : (-> void)
+	fn()
+	exit()
+}

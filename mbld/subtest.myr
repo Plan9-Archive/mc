@@ -1,0 +1,274 @@
+use std
+use bio
+use regex
+
+use "types"
+use "util"
+
+pkg bld =
+	const showsub	: (b : build#, cmd : byte[:], \
+		f : std.fd, logfd : std.fd, \
+		failed : byte[:][:]# -> std.option(bool))
+;;
+
+var planpat
+var headpat
+var footpat
+
+const __init__ = {
+	planpat = std.try(regex.compile("MTEST\\s+(-?\\d+)\\s*"))
+	headpat = std.try(regex.compile("test\\s+(.*)<<{!\\s*"))
+	footpat = std.try(regex.compile("!}>>\\s*(ok|fail|timing|skip)\\s*(.*)\\s*"))
+}
+
+const showsub = {b, cmd, fd, logfd, failed
+	var f, log
+	var res
+
+	f = bio.mkfile(fd, bio.Rd)
+	log = bio.mkfile(logfd, bio.Wr)
+	res = `std.None
+	match bio.readln(f)
+	| `std.Err `bio.Eof:
+		-> `std.None
+	| `std.Err e:
+		std.fatal("error reading subfile: {}\n", e)
+	| `std.Ok ln:
+		match testplan(ln)
+		| `std.None:
+			bio.write(log, ln)
+			showraw(fd, logfd)
+		| `std.Some ntests:
+			res = `std.Some showtests(b, cmd, failed, \
+				f, log, ntests)
+		;;
+
+		std.slfree(ln)
+	;;
+	bio.close(f)
+	bio.close(log)
+	-> res
+}
+
+const showraw = {f, log
+	var buf : byte[:]
+
+	buf = std.slalloc(64*std.KiB)
+	while true
+		match std.read(f, buf[:])
+		| `std.Ok 0:	break
+		| `std.Ok n:	std.write(log, buf[:n])
+		| `std.Err e:	std.fatal("error writing log: {}\n", e)
+		;;
+	;;
+	std.slfree(buf)
+}
+
+const showtests = {b, cmd, failed, f, log, ntests
+	var curtest
+	var nresults
+	var ok
+
+	if ntests == 0
+		mbldput("FAIL: missing tests\n")
+		-> false
+	;;
+	ok = true
+	curtest = ""
+	nresults = 0
+	mbldput("\n")
+	for ln : bio.byline(f)
+		ln = std.strstrip(ln)
+		match testhead(ln)
+		| `std.None:
+		| `std.Some t:	
+			starttest(&curtest, t)
+			bio.put(log, "RUN {}\n", t)
+			continue
+		;;
+
+		match testfoot(ln)
+		| `std.None:
+		| `std.Some `Timing (niter, avg, stddev):
+			showbench(b, &curtest, &nresults, niter, avg, stddev)
+			continue
+		| `std.Some `Skip:
+			skiptest(b, &curtest, &nresults)
+			continue
+		| `std.Some `Pass:
+			passtest(b, &curtest, &nresults)
+			continue
+		| `std.Some `Fail m:
+			failtest(b, cmd, &curtest, failed, &nresults, m)
+			ok = false
+			continue
+		;;
+
+		match testplan(ln)
+		| `std.None:
+		| `std.Some n:
+			if curtest.len == 0
+				if !checktests(ntests, nresults)
+					ok = false
+				;;
+				ntests = n
+				nresults = 0
+				continue
+			;;
+		;;
+
+		bio.put(log, "\t{}\n", ln)
+	;;
+	if !checktests(ntests, nresults)
+		ok = false
+	;;
+	-> ok
+}
+
+const checktests = {ntests, nresults
+	/*
+	  FIXME: ugly hack.
+	  we don't currently print subtests all the time, so we don't check
+	  plan count here.
+	 */
+	match std.getenv("MTEST_SUBSET")
+	| `std.Some _:	-> true
+	| `std.None:
+		if ntests > 0 && ntests != nresults
+			mbldput("mismatched test count: expected {}, got {}\n", ntests, nresults)
+			-> false
+		;;
+		-> true
+	;;
+}
+
+const starttest = {curtest, t
+	if curtest#.len != 0
+		std.fatal("malformed input: test {} nested in {}\n", t, curtest)
+	;;
+	mbldput("\trun {}:\t", std.strstrip(t))
+	curtest# = t
+}
+
+const skiptest = {b, curtest, nresults
+	donetest(b, curtest, nresults)
+	mbldput("SKIP\n")
+}
+
+const passtest = {b, curtest, nresults
+	donetest(b, curtest, nresults)
+	mbldput("PASS\n")
+}
+
+const showbench = {b, curtest, nresults, niter, avg, stddev
+	var scale, unit
+	donetest(b, curtest, nresults)
+	(scale, unit) = displayscale(avg)
+	std.put("BENCH:\t{}{} (σ^2: {})\n", avg*scale, unit, stddev*scale);
+}
+
+const units = [
+	"s",
+	"ms",
+	"μs",
+	"ns",
+]
+const displayscale = {val
+	var scale
+
+	scale = 1.0
+	for var i = 0; i < units.len; i++
+		if val*scale > 1.0
+			-> (scale, units[i])
+		;;
+		scale *= 1000.0
+	;;
+	-> (scale, units[units.len - 1])
+}
+
+const failtest = {b, cmd, curtest, failed, nresults, msg
+	var p
+
+	p = std.pathcat(cmd, curtest#)
+	donetest(b, curtest, nresults)
+	mbldput("FAIL {e}\n", msg)
+	std.slpush(failed, p)
+}
+
+const donetest = {b, curtest, nresults
+	if curtest#.len == 0
+		std.fatal("malformed input: test ended without start\n")
+	;;
+	std.slfree(curtest#)
+	curtest# = ""
+	nresults#++
+}
+
+const testplan = {ln
+	var ntests
+
+	match regex.exec(planpat, ln)
+	| `std.None:
+		-> `std.None
+	| `std.Some m:
+		ntests = std.get(std.intparse(m[1]))
+		regex.matchfree(m)
+		-> `std.Some ntests
+	;;
+}
+
+const testhead = {ln
+	var t
+
+	match regex.exec(headpat, ln)
+	| `std.Some m:
+		t = std.sldup(m[1])
+		regex.matchfree(m)
+		-> `std.Some t
+	| `std.None:
+		-> `std.None
+	;;
+}
+
+const testfoot = {ln
+	match regex.exec(footpat, ln)
+	| `std.Some m:
+		match m[1]
+		| "skip":	-> `std.Some `Skip
+		| "timing":	-> parsetiming(m[2])
+		| "ok":		-> `std.Some `Pass
+		| "fail":	-> `std.Some `Fail std.sldup(m[2])
+		| junk:		-> `std.Some `Fail std.fmt("garbled : {}", junk)
+		;;
+	| `std.None:
+		-> `std.None
+	;;
+}
+
+const parsetiming = {tm
+	var niter, avg, stddev
+	var sp, buf : byte[:][3]
+
+	sp = std.bstrtok(buf[:], tm)
+	if sp.len != 3
+		-> `std.None
+	;;
+
+	match std.intparse(sp[0])
+	| `std.Some n:	niter = n
+	| `std.None:	-> `std.None
+	;;
+
+	match std.flt64parse(sp[1])
+	| `std.Some n:	avg = n
+	| `std.None:	-> `std.None
+	;;
+
+	match std.flt64parse(sp[2])
+	| `std.Some n:	stddev = n
+	| `std.None:	-> `std.None
+	;;
+
+	-> `std.Some `Timing (niter, avg, stddev)
+}
+

@@ -1,0 +1,188 @@
+use std
+use regex
+
+pkg =
+	const testmatch	: (\
+		pat : byte[:], \
+		text : byte[:], \
+		expected : std.option(byte[:][:]) \
+		-> void)
+
+	const testidxmatch	: (\
+		pat : byte[:], \
+		text : byte[:], \
+		expected : std.option((std.size, std.size)[:]) \
+		-> void)
+
+	const testsearch	: ( \
+		pat : byte[:], \
+		text : byte[:], \
+		expected : std.option(byte[:][:]) \
+		-> void)
+
+	const testsub	: ( \
+		pat : byte[:], \
+		text : byte[:], \
+		sub : byte[:][:], \
+		expected : std.option(byte[:]) \
+		-> void)
+
+	const testsuball	: ( \
+		pat : byte[:], \
+		text : byte[:], \
+		sub : byte[:][:], \
+		expected : std.option(byte[:]) \
+		-> void)
+
+	const dbgmatch	: ( \
+		pat : byte[:], \
+		text : byte[:], \
+		expected : std.option(byte[:][:]) \
+		-> void)
+;;
+
+const testmatch = {pat, text, expected
+	run(regex.compile(pat), pat, text, expected, false)
+}
+
+const testidxmatch = {pat, text, expected
+	runidx(regex.compile(pat), pat, text, expected, false)
+}
+
+const testsearch = {pat, text, expected
+	run(regex.compile(pat), pat, text, expected, true)
+}
+
+const testsub = {pat, text, sub, expected
+	subst(regex.compile(pat), pat, text, sub, expected, false)
+}
+
+const testsuball = {pat, text, sub, expected
+	subst(regex.compile(pat), pat, text, sub, expected, true)
+}
+
+const dbgmatch = {pat, text, expected
+	run(regex.dbgcompile(pat, true), pat, text, expected, false)
+}
+
+const subst = {restr, pat, text, sub, expected, all
+	var re, r
+
+	re = std.try(restr)
+	if all
+		r = `std.Some regex.suball(re, text, sub)
+	else
+		r = regex.sub(re, text, sub)
+	;;
+	match r
+	| `std.Some res:
+		std.put("res: {}\n", res)
+		match expected
+		| `std.Some e:
+			if !std.eq(res, e)
+				std.fatal("bad subst: expected {}, got {}\n", e, res)
+			;;
+		| `std.None:
+			std.fatal("expected no subst, got {}", res)
+		;;
+	| `std.None:
+		match expected
+		| `std.Some e:
+			std.fatal("got no sub, expected {}\n", e)
+		| `std.None:
+		;;
+	;;
+}
+
+const runidx = {restr, pat, text, expected : std.option((std.size, std.size)[:]), search
+	var re, r
+	var lo, elo, hi, ehi
+
+	re = std.try(restr)
+	if search
+		r = regex.isearch(re, text)
+	else
+		r = regex.iexec(re, text)
+	;;
+	match r
+	| `std.Some res:
+		match expected
+		| `std.None:
+			std.fatal("expected no match, got:")
+			for var i = 0; i < res.len; i++
+				std.put("\t{}: {}\n", i, res[i])
+			;;
+		| `std.Some exp:
+			if res.len != exp.len
+				std.put("mismatch: expected {} matches, got {}\n",  exp.len, res.len)
+				std.fatal("failed matching {} over {}\n", pat, text)
+			;;
+			for var i = 0; i < exp.len; i++
+				(elo, ehi) = exp[i]
+				(lo, hi) = res[i]
+				if lo != elo || hi != ehi
+					std.put("mismatch on {}: expected {}, got {}\n", i, exp[i], res[i])
+					std.fatal("failed matching {} over {}\n", pat, text)
+				;;
+			;;
+		;;
+	| `std.None:
+		match expected
+		| `std.None:	/* : expected failure */
+		| `std.Some matches:
+			std.put("expected matches:\n")
+			for var i = 0; i < matches.len; i++
+				std.put("\t{}: {}\n", i, matches[i])
+			;;
+			std.fatal("no match found\n")
+		;;
+	;;
+	regex.free(re)
+}
+const run = {restr, pat, text, expected, search
+	var i, re, r
+
+	re = std.try(restr)
+	if search
+		r = regex.search(re, text)
+	else
+		r = regex.exec(re, text)
+	;;
+	match r
+	| `std.Some res:
+		match expected
+		| `std.None:
+			std.fatal("expected no match, got:")
+			for i = 0; i < res.len; i++
+				std.put("\t{}: {}\n", i, res[i])
+			;;
+		| `std.Some exp:
+			if !search && !std.eq(res[0], text)
+				std.put("whole match does not match text!\n")
+				std.fatal("failed matching {} over {}\n", pat, text)
+			;;
+			res = res[1:]
+			if res.len != exp.len
+				std.put("mismatch: expected {} matches, got {}\n",  exp.len, res.len)
+				std.fatal("failed matching {} over {}\n", pat, text)
+			;;
+			for i = 0; i < exp.len; i++
+				if !std.eq(res[i], exp[i])
+					std.put("mismatch on {}: expected {}, got {}\n", i, exp[i], res[i])
+					std.fatal("failed matching {} over {}\n", pat, text)
+				;;
+			;;
+		;;
+	| `std.None:
+		match expected
+		| `std.None:	/* : expected failure */
+		| `std.Some matches:
+			std.put("expected matches:\n")
+			for i = 0; i < matches.len; i++
+				std.put("\t{}: {}\n", i, matches[i])
+			;;
+			std.fatal("no match found\n")
+		;;
+	;;
+	regex.free(re)
+}

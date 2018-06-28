@@ -1,0 +1,128 @@
+use std
+use bio
+
+var stackaggr = 10
+var summary
+var allocstats
+
+type memstats = struct
+	allocs	: std.size
+	allocsz	: std.size
+	frees	: std.size
+	freesz	: std.size
+	tab	: std.htab(std.size, (std.size, std.size[:]))#
+;;
+
+
+const main = {args
+	var cmd
+	var stats : memstats
+
+	cmd = std.optparse(args, &[
+		.argdesc="dumps...",
+		.opts=[
+			[.opt='a', .arg="", .desc="show all allocations, regardless of frees"],
+			[.opt='d', .arg="depth", .desc="aggregate by at most `depth` stack elements"],
+			[.opt='s', .arg="", .desc="only show a summary of memory activity"],
+		][:]
+	])
+
+	for opt : cmd.opts
+		match opt
+		| ('a',""):
+			allocstats = true
+		| ('d', depth):
+			match std.intparse(depth)
+			| `std.Some d:	stackaggr = d
+			| `std.None:	std.fatal("could not parse stack depth {}\n", depth)
+			;;
+		| ('s', ""):
+			summary = true
+		| _:	
+			std.die("unreachable")
+		;;
+	;;
+
+	std.clear(&stats)
+	stats.tab = std.mkht()
+	for d : cmd.args
+		match bio.open(d, bio.Rd)
+		| `std.Ok f:	dump(d, f, &stats)
+		| `std.Err e:	std.fatal("could not open {}: {}\n", d, e)
+		;;
+	;;
+}
+
+const dump = {path, f, stats
+	while true
+		match bio.getle64(f)
+		| `std.Err `bio.Eof:	break
+		| `std.Ok 0:		tracealloc(path, f, stats)
+		| `std.Ok 1:		tracefree(path, f, stats)
+		| `std.Ok wat:		std.fatal("unknown action type {x}\n", wat)
+		| `std.Err e:		std.fatal("failed to read {}: {}\n", path, e)
+		;;
+	;;
+	if !summary
+		dumptrace(stats.tab)
+	;;
+	dumpsummary(stats)
+}
+
+const dumpsummary = {stats
+	std.put("allocs:\t{}\n", stats.allocs)
+	std.put("allocsz:\t{}\n", stats.allocsz)
+	std.put("frees:\t{}\n", stats.frees)
+	std.put("freesz:\t{}\n", stats.freesz)
+	std.put("livesz:\t{}\n", stats.allocsz - stats.freesz)
+}
+
+
+const tracealloc = {path, f, stats
+	var ptr, sz, stk
+
+	ptr = get64(path, f)
+	sz = get64(path, f)
+	stk = [][:]
+	for var i = 0; i < 20; i++
+		std.slpush(&stk, get64(path, f))
+	;;
+	stats.allocs++
+	stats.allocsz += sz
+	std.htput(stats.tab, ptr, (sz, stk))
+}
+
+const tracefree = {path, f, stats
+	var ptr, sz
+
+	ptr = get64(path, f)
+	sz = get64(path, f)
+	stats.frees++
+	stats.freesz += sz
+	std.htdel(stats.tab, ptr)
+}
+
+const dumptrace = {tab
+	var aggr
+
+	aggr = std.mkht()
+	for (k, (sz, stk)) : std.byhtkeyvals(tab)
+		match std.htget(aggr, stk[:stackaggr])
+		| `std.Some (count, total):	
+			std.htput(aggr, stk[:stackaggr], (count + 1, sz + total))
+		| `std.None:	
+			std.htput(aggr, stk[:stackaggr], (1, sz))
+		;;
+	;;
+	
+	for (stk, (n, sz)) : std.byhtkeyvals(aggr)
+		std.put("unfreed: {} (size: {}): {}\n", n, sz, stk)
+	;;
+}
+
+const get64 = {path, f
+	match bio.getle64(f)
+	| `std.Ok v:	-> v
+	| res:	std.fatal("failed to read {}: {}\n", path, res)
+	;;
+}

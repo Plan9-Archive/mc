@@ -1,0 +1,13 @@
+lib date =
+	date.myr
+	fmt.myr
+	names.myr
+	parse.myr
+	types.myr
+	zoneinfo+posixy.myr
+	zoneinfo+plan9.myr
+
+        lib ../sys:sys
+        lib ../std:std
+;;
+

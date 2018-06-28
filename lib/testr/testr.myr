@@ -1,0 +1,202 @@
+use std
+
+pkg testr =
+	type ctx = struct
+		ok	: bool
+		reason	: byte[:]
+		jmpbuf	: std.jmpbuf#
+	;;
+
+	type spec = struct
+		name	: byte[:]
+		fn	: (ctx : ctx# -> void)
+	;;
+
+	const run	: (specs : spec[:] -> void)
+	const bench	: (specs : spec[:] -> void)
+	const ok	: (ctx : ctx# -> void)
+	const fail	: (ctx : ctx#, msg : byte[:], args : ... -> void)
+	const check	: (ctx : ctx#, cond : bool, msg : byte[:], args : ... -> void)
+	generic eq	: (ctx : ctx#, a : @t, b : @t -> void) :: std.equatable @t
+	generic neq	: (ctx : ctx#, a : @t, b : @t -> void) :: std.equatable @t
+
+	const softfail	: (ctx : ctx#, msg : byte[:], args : ... -> void)
+;;
+
+const bench = {specs
+	var subset
+
+	subset = subtests()
+	std.put("MTEST {}\n", specs.len)
+	for s : specs
+		benchspec(&s, subset)
+	;;
+	std.htfree(subset)
+}
+
+const run = {specs
+	var subset
+
+	subset = subtests()
+	std.put("MTEST {}\n", specs.len)
+	for s : specs
+		testspec(&s, subset)
+	;;
+	std.htfree(subset)
+}
+
+const ok = {ctx
+	/* nothing to do here */
+}
+
+const check = {ctx, cond, msg, args
+	var ap
+	
+	if !cond
+		ap = std.vastart(&args)
+		failv(ctx, msg, &ap)
+	;;
+}
+
+generic eq = {ctx, a, b
+	var b0 : byte[128]
+	var b1 : byte[128]
+
+	if !std.eq(a, b)
+		fail(ctx, "{e} != {e}\n",
+		     std.bfmt(b0[:], "{}", a),
+		     std.bfmt(b1[:], "{}", b))
+	;;
+}
+
+generic neq = {ctx, a, b
+	var b0 : byte[128]
+	var b1 : byte[128]
+
+	if std.eq(a, b)
+		fail(ctx, "{e} != {e}\n",
+		     std.bfmt(b0[:], "{}", a),
+		     std.bfmt(b1[:], "{}", b))
+	;;
+}
+
+const fail = {ctx, msg, args
+	var ap
+	
+	ap = std.vastart(&args)
+	failv(ctx, msg, &ap)
+}
+
+const failv = {ctx, msg, ap
+	softfailv(ctx, msg, ap)
+	std.longjmp(ctx.jmpbuf)
+}
+
+const softfail = {ctx, msg, args
+	var ap
+	
+	ap = std.vastart(&args)
+	softfailv(ctx, msg, &ap)
+}
+
+const softfailv = {ctx, msg, ap
+	/* keep the first failure */
+	if ctx.ok
+		ctx.ok = false
+		ctx.reason = std.fmtv(msg, ap)
+	;;
+}
+
+const benchspec = {ts, sub
+	var ctx : ctx
+	var avg, m, d, n, nsamp
+	var start, dt
+	var dorun, jmpbuf
+
+	ctx.ok = true
+	ctx.reason = ""
+	ctx.jmpbuf = &jmpbuf
+
+	avg = 0.0;
+	m = 0.0;
+	n = 0.0;
+	nsamp = 0
+	dorun = matchtest(ts.name, sub)
+	std.put("test {} <<{{!\n", ts.name)
+	if !std.setjmp(&jmpbuf) && dorun
+		/* estimate samples */
+		start = std.now()
+		ts.fn(&ctx)
+		dt = (std.now() - start : flt64)
+
+		if dt == 0.0
+			nsamp = 1000_000
+		else
+			nsamp = (100_000.0/dt : int64)
+			nsamp = std.max(10, nsamp)
+		;;
+
+		for var i = 0; i < nsamp; i++
+			n +=1.0;
+			start = std.now()
+			ts.fn(&ctx)
+			dt = (std.now() - start : flt64)/1_000_000.0
+			d = (dt - avg);
+			avg = avg + d/n;
+			m = m + d*(dt - avg);
+		;;
+	;;
+
+	if !dorun
+		std.put("!}}>> skip filtered\n", nsamp, avg, m)
+	elif ctx.ok
+		std.put("!}}>> timing {} {} {}\n", nsamp, avg, m)
+	else
+		std.put("!}}>> fail {}\n", ctx.reason)
+		std.slfree(ctx.reason)
+	;;
+}
+
+const testspec = {ts, sub
+	var ctx : ctx
+	var jmpbuf
+
+	ctx.ok = true
+	ctx.reason = ""
+	ctx.jmpbuf = &jmpbuf
+	if !matchtest(ts.name, sub)
+		-> void
+	;;
+
+	std.put("test {} <<{{!\n", ts.name)
+	if !std.setjmp(&jmpbuf)
+		ts.fn(&ctx)
+	;;
+
+	if ctx.ok
+		std.put("!}}>> ok\n")
+	else
+		std.put("!}}>> fail {}\n", ctx.reason)
+		std.slfree(ctx.reason)
+	;;
+}
+
+const subtests = {
+	var subset
+
+	subset = std.mkht()
+	match std.getenv("MTEST_SUBSET")
+	| `std.None:	/* no subtests */
+	| `std.Some "":	/* no subtests */
+	| `std.Some subs:
+		for s : std.bysplit(subs, ",")
+			std.htput(subset, s, true)
+		;;
+	;;
+	-> subset
+}
+
+const matchtest = {name, sub
+	-> std.htcount(sub) == 0 || std.hthas(sub, name)
+}
+

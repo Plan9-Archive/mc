@@ -1,0 +1,11 @@
+testdeps = ../testr:testr ;;
+
+lib escfmt =
+	escsh.myr
+	eschtml.myr
+	escurl.myr
+	escre.myr
+
+	lib ../std:std
+        lib ../sys:sys
+;;
