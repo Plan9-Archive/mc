@@ -120,9 +120,9 @@ nodetystr(Node *n)
 
 	t = NULL;
 	if (n->type == Nexpr && exprtype(n) != NULL)
-		t = tyfix(n, exprtype(n), 1);
+		t = tysearch(exprtype(n));
 	else if (n->type == Ndecl && decltype(n) != NULL)
-		t = tyfix(n, decltype(n), 1);
+		t = tysearch(decltype(n));
 
 	if (t && tybase(t)->type != Tyvar)
 		return tystr(t);
@@ -227,6 +227,9 @@ ctxstr(Node *n)
 				break;
 			case Omemb:
 				bprintf(buf, sizeof buf, "<%s>.%s", t1, namestr(args[1]));
+				break;
+			case Otupmemb:
+				bprintf(buf, sizeof buf, "<%s>.%llu", t1, args[1]->lit.intval);
 				break;
 			default:
 				bprintf(buf, sizeof buf, "%s:%s", d, t);
@@ -514,7 +517,8 @@ tyresolve(Type *t)
 	case Tyunion:
 		inaggr++;
 		for (i = 0; i < t->nmemb; i++) {
-			t->udecls[i]->utype = t;
+			if (!t->udecls[i]->utype)
+				t->udecls[i]->utype = t;
 			t->udecls[i]->utype = tf(t->udecls[i]->utype);
 			if (t->udecls[i]->etype) {
 				tyresolve(t->udecls[i]->etype);
@@ -1498,14 +1502,18 @@ inferucon(Node *n, int *isconst)
 	 *
 	 * To make it compile, for now, we just bind the types in here.
 	 */
-	t = tysubst(tf(uc->utype), uc->utype);
+	t = uc->utype;
+	if (t->type != Tyunion)
+		t = t->sub[0];
+	assert(t->type == Tyunion);
+	t = tysubst(tf(t), t);
 	uc = tybase(t)->udecls[uc->id];
 	if (uc->etype) {
 		inferexpr(&n->expr.args[1], NULL, NULL);
 		unify(n, uc->etype, type(n->expr.args[1]));
 		*isconst = n->expr.args[1]->expr.isconst;
 	}
-	settype(n, delayeducon(t));
+	settype(n, delayeducon(uc->utype));
 }
 
 static void
@@ -1764,6 +1772,7 @@ inferexpr(Node **np, Type *ret, int *sawret)
 		break;
 
 		/* special cases */
+	case Otupmemb:	/* @a.N -> @b, verify type(@a.N)==@b later */
 	case Omemb:	/* @a.Ident -> @b, verify type(@a.Ident)==@b later */
 		infersub(n, ret, sawret, &isconst);
 		settype(n, mktyvar(n->loc));
@@ -2253,27 +2262,22 @@ infercompn(Node *n, Node ***rem, size_t *nrem, Stab ***remscope, size_t *nremsco
 	Type *t;
 	size_t i;
 	int found;
+	int ismemb;
+	uvlong idx;
 
 	aggr = n->expr.args[0];
 	memb = n->expr.args[1];
+	ismemb = n->expr.op == Omemb;
 
 	found = 0;
 	t = tybase(tf(type(aggr)));
 	/* all array-like types have a fake "len" member that we emulate */
-	if (t->type == Tyslice || t->type == Tyarray) {
+	if (ismemb && (t->type == Tyslice || t->type == Tyarray)) {
 		if (!strcmp(namestr(memb), "len")) {
 			constrain(n, type(n), traittab[Tcnum]);
 			constrain(n, type(n), traittab[Tcint]);
 			found = 1;
 		}
-	/*
- 	 * otherwise, we search aggregate types for the member, and unify
-	 * the expression with the member type; ie:
-	 *
-	 *	 x: aggrtype	y : memb in aggrtype
-	 *	 ---------------------------------------
-	 *			   x.y : membtype
-	 */
 	} else {
 		if (tybase(t)->type == Typtr)
 			t = tybase(tf(t->sub[0]));
@@ -2284,17 +2288,39 @@ infercompn(Node *n, Node ***rem, size_t *nrem, Stab ***remscope, size_t *nremsco
 			lappend(rem, nrem, n);
 			lappend(remscope, nremscope, curstab());
 			return;
-		} else if (tybase(t)->type != Tystruct) {
-			fatal(n, "type %s does not support member operators near %s",
-					tystr(t), ctxstr(n));
 		}
-		nl = t->sdecls;
-		for (i = 0; i < t->nmemb; i++) {
-			if (!strcmp(namestr(memb), declname(nl[i]))) {
-				unify(n, type(n), decltype(nl[i]));
-				found = 1;
-				break;
+		if (ismemb) {
+			/*
+			 * aggregate types for the member, and unify the expression with the
+			 * member type; ie:
+			 *
+			 *	 x: aggrtype	y : memb in aggrtype
+			 *	 ---------------------------------------
+			 *			   x.y : membtype
+			 */
+			if (tybase(t)->type != Tystruct)
+				fatal(n, "type %s does not support member operators near %s",
+						tystr(t), ctxstr(n));
+			nl = t->sdecls;
+			for (i = 0; i < t->nmemb; i++) {
+				if (!strcmp(namestr(memb), declname(nl[i]))) {
+					unify(n, type(n), decltype(nl[i]));
+					found = 1;
+					break;
+				}
 			}
+		} else {
+			/* tuple access; similar to the logic for member accesses */
+			if (tybase(t)->type != Tytuple)
+				fatal(n, "type %s does not support tuple access operators near %s",
+						tystr(t), ctxstr(n));
+			assert(memb->type == Nlit);
+			idx = memb->lit.intval;
+			if (idx >= t->nsub)
+				fatal(n, "cannot access element %llu of a tuple of type %s near %s",
+						idx, tystr(t), ctxstr(n));
+			unify(n, type(n), t->sub[idx]);
+			found = 1;
 		}
 	}
 	if (!found)
@@ -2414,6 +2440,7 @@ postcheckpass(Node ***rem, size_t *nrem, Stab ***remscope, size_t *nremscope)
 		pushstab(postcheckscope[i]);
 		if (n->type == Nexpr) {
 			switch (exprop(n)) {
+			case Otupmemb:
 			case Omemb:	infercompn(n, rem, nrem, remscope, nremscope);	break;
 			case Ocast:	checkcast(n, rem, nrem, remscope, nremscope);	break;
 			case Ostruct:	checkstruct(n, rem, nrem, remscope, nremscope);	break;
