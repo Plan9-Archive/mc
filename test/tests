@@ -91,7 +91,7 @@ B pkgtrait	E	42
 B gtrait	P	'`std.Before'
 B emptytrait	E	123
 B traitimpl	P	246,44,meee
-# B compoundimpl	P	intptr,charptr BUGGERED
+#B compoundimpl	P	intptr,charptr
 B nestucon	P	asdf
 B mkunion	E	0
 B uconinit	P	'A B C 123'
@@ -110,6 +110,7 @@ B sizeof	E	4
 B gsizeof	E	5
 B matchint	E	84
 B matchconst	E	88
+B matchoverwild	E	0
 B matchnsconst	P	'matched badchar'
 B matchunion	E	84
 B matchtup	E	42
@@ -124,15 +125,17 @@ B matchbind	E	8
 B matchptr	P	'worked'
 B matchnest	P	'abcdef'
 F matchmixed
+F matchoverlap
 B bigliteral	P	34359738368
 B arraylit-ni	E	2
 B arraypack	P	'(1, foo)(2, bar)(3, baz)'
 B arraypass	P	1
 B livearraylit	E	21
-# B arraylit	E	3       ## BUGGERED
+B arraylit	E	3
 B structlit	E	42
 B livestructlit	E	21
 B tuple		E	42
+B tupleaccess	P	'a: 0, b: 5, c: 2'
 B slgrow        E       42
 B tyrec		E	42
 B infer-named   E       99
@@ -148,6 +151,7 @@ B strfind	C
 B strjoin	C
 B exporttrait	E	0
 B local-labels	E	10
+B empty-struct	E	21
 B empty-struct	E	21
 F declmismatch
 F infermismatch

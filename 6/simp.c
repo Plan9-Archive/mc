@@ -298,7 +298,7 @@ slicelen(Simp *s, Node *sl)
 Node *
 loadvar(Simp *s, Node *n, Node *dst)
 {
-	Node *p, *f, *r;
+	Node *p, *f, *r, *e;
 
 	if (isconstfn(n)) {
 		if (dst)
@@ -308,6 +308,9 @@ loadvar(Simp *s, Node *n, Node *dst)
 		f = getcode(s, n);
 		p = addr(s, r, exprtype(n));
 		assignat(s, p, Ptrsz, f);
+		e = mkintlit(n->loc, 0);
+		e->expr.type = tyintptr;
+		assignat(s, p, 0, e);
 	} else {
 		r = n;
 	}
@@ -540,6 +543,7 @@ lval(Simp *s, Node *n)
 	case Ovar:	r = loadvar(s, n, NULL);	break;
 	case Oidx:	r = loadidx(s, args[0], args[1]);	break;
 	case Oderef:	r = deref(rval(s, args[0], NULL), NULL);	break;
+	case Otupmemb:	r = rval(s, n, NULL);	break;
 	case Omemb:	r = rval(s, n, NULL);	break;
 	case Ostruct:	r = rval(s, n, NULL);	break;
 	case Oucon:	r = rval(s, n, NULL);	break;
@@ -993,6 +997,7 @@ capture(Simp *s, Node *n, Node *dst)
 		for (i = 0; i < nenv; i++) {
 			lappend(&envt, &nenvt, decltype(env[i]));
 			sz += size(env[i]);
+			sz = alignto(sz, decltype(env[i]));
 		}
 
 		t = gentemp(n->loc, mktytuple(n->loc, envt, nenvt), &dcl);
@@ -1137,8 +1142,7 @@ rval(Simp *s, Node *n, Node *dst)
 		u = idxaddr(s, t, n->expr.args[1]);
 		r = load(u);
 		break;
-	/* array.len slice.len are magic 'virtual' members.
-	* they need to be special cased. */
+	case Otupmemb:
 	case Omemb:
 		t = membaddr(s, n);
 		r = load(t);

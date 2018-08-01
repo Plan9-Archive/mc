@@ -58,6 +58,7 @@ static Node *flatten(Flattenctx *s, Node *n);
 static Node *rval(Flattenctx *s, Node *n);
 static Node *lval(Flattenctx *s, Node *n);
 static Node *assign(Flattenctx *s, Node *lhs, Node *rhs);
+static Node *draininc(Flattenctx *c, Node *protect, int free);
 
 static void
 append(Flattenctx *s, Node *n)
@@ -385,7 +386,12 @@ comparecomplex(Flattenctx *s, Node *n, Op op)
 		r = mkexpr(n->loc, Outag, rval(s, n->expr.args[1]), NULL);
 		l->expr.type = mktype(n->loc, Tyuint32);
 		r->expr.type = mktype(n->loc, Tyuint32);
-		e = mkexpr(n->loc, Oueq, l, r, NULL);
+		if (op == Oeq)
+			e = mkexpr(n->loc, Oueq, l, r, NULL);
+		else if (op == One)
+			e = mkexpr(n->loc, Oune, l, r, NULL);
+		else
+			fatal(n, "unsupported operator %s for enum union", opstr[op]);
 		e->expr.type = mktype(n->loc, Tybool);
 		return e;
 	}
@@ -457,6 +463,30 @@ assign(Flattenctx *s, Node *lhs, Node *rhs)
 	return r;
 }
 
+/* 
+ * If protect is not null, returns a node with the
+ * unmodified value.
+ */
+static Node*
+draininc(Flattenctx *fc, Node *protect, int free)
+{
+	Node *tmp;
+	size_t i;
+
+	tmp = NULL;
+	if (!fc->nqueue)
+		return protect;
+	if (protect) {
+		tmp = temp(fc, protect);
+		append(fc, assign(fc, tmp, protect));
+	}
+	for (i = 0; i < fc->nqueue; i++)
+		append(fc, fc->incqueue[i]);
+	if (free)
+		lfree(&fc->incqueue, &fc->nqueue);
+	return tmp;
+}
+
 /* returns 1 when the exit jump needs to be emitted */
 static int
 exitscope(Flattenctx *s, Stab *stop, Srcloc loc, Exit x)
@@ -488,7 +518,6 @@ rval(Flattenctx *s, Node *n)
 	Node *t, *u, *v; /* temporary nodes */
 	Node *r; /* expression result */
 	Node **args;
-	size_t i;
 	Type *ty;
 
 	const Op fusedmap[Numops] = {
@@ -508,9 +537,8 @@ rval(Flattenctx *s, Node *n)
 	args = n->expr.args;
 	switch (exprop(n)) {
 	case Oauto:
-		r = rval(s, n->expr.args[0]);
-		t = temp(s, r);
-		r = asn(t, r);
+		t = temp(s, n);
+		r = assign(s, t, n->expr.args[0]);
 		lappend(&s->curst->autotmp, &s->curst->nautotmp, t);
 		break;
 	case Osize:
@@ -532,8 +560,9 @@ rval(Flattenctx *s, Node *n)
 		if (ty->type == Tyslice || ty->type == Tyarray) {
 			r = seqlen(s, args[0], exprtype(n));
 		} else {
+	case Otupmemb:
 			t = rval(s, args[0]);
-			r = mkexpr(n->loc, Omemb, t, args[1], NULL);
+			r = mkexpr(n->loc, exprop(n), t, args[1], NULL);
 			r->expr.type = n->expr.type;
 		}
 		break;
@@ -607,18 +636,8 @@ rval(Flattenctx *s, Node *n)
 		r = n;
 		break;;
 	case Oret:
-		/* drain the increment queue before we return */
 		v = rval(s, args[0]);
-		if (!s->nqueue) {
-			t = v;
-		} else {
-			t = temp(s, v);
-			u = assign(s, t, v);
-			append(s, u);
-			for (i = 0; i < s->nqueue; i++)
-				append(s, s->incqueue[i]);
-			lfree(&s->incqueue, &s->nqueue);
-		}
+		t = draininc(s, v, 1);
 		if (!s->tret)
 			s->tret = temp(s, v);
 		flatten(s, asn(lval(s, s->tret), t));
@@ -678,6 +697,7 @@ lval(Flattenctx *s, Node *n)
 	case Ovar:	r = n;	break;
 	case Oidx:	r = rval(s, n);	break;
 	case Oderef:	r = rval(s, n);	break;
+	case Otupmemb:	r = rval(s, n); break;
 	case Omemb:	r = rval(s, n);	break;
 	case Ostruct:	r = rval(s, n);	break;
 
@@ -734,7 +754,6 @@ flattenloop(Flattenctx *s, Node *n)
 	Node *ldec;
 	Node *lcond;
 	Node *lstep;
-	size_t i;
 
 	lbody = genlbl(n->loc);
 	ldec = genlbl(n->loc);
@@ -760,14 +779,10 @@ flattenloop(Flattenctx *s, Node *n)
 	flatten(s, lcond);             /* test lbl */
 	flattencond(s, n->loopstmt.cond, ldec, lend);    /* repeat? */
 	flatten(s, ldec);        	/* drain decrements */
-	for (i = 0; i < s->nqueue; i++)
-		append(s, s->incqueue[i]);
+	draininc(s, NULL, 0);
 	jmp(s, lbody);              	/* goto test */
 	flatten(s, lend);             	/* exit */
-
-	for (i = 0; i < s->nqueue; i++)
-		append(s, s->incqueue[i]);
-	lfree(&s->incqueue, &s->nqueue);
+	draininc(s, NULL, 1);
 
 	s->inloop--;
 	s->loop = l;
@@ -781,7 +796,6 @@ flattenif(Flattenctx *s, Node *n, Node *exit)
 {
 	Node *l1, *l2, *l3;
 	Node *iftrue, *iffalse;
-	size_t i;
 
 	l1 = genlbl(n->loc);
 	l2 = genlbl(n->loc);
@@ -795,15 +809,12 @@ flattenif(Flattenctx *s, Node *n, Node *exit)
 
 	flattencond(s, n->ifstmt.cond, l1, l2);
 	flatten(s, l1);
-	for (i = 0; i < s->nqueue; i++)
-		append(s, s->incqueue[i]);
+	draininc(s, NULL, 0);
 	/* goto test */
 	flatten(s, iftrue);
 	jmp(s, l3);
 	flatten(s, l2);
-	for (i = 0; i < s->nqueue; i++)
-		append(s, s->incqueue[i]);
-	lfree(&s->incqueue, &s->nqueue);
+	draininc(s, NULL, 1);
 	/* because lots of bunched up end labels are ugly,
 	 * coalesce them by handling 'elif'-like construct
 	 * separately */
@@ -1007,14 +1018,15 @@ flatteniter(Flattenctx *s, Node *n)
 	default:	flattentraititer(s, n);	break;
 	}
 }
+
 static void
 flattenmatch(Flattenctx *fc, Node *n)
 {
-	Node *val;
-	Node **match;
+	Node *val, **match;
 	size_t i, nmatch;
 
 	val = rval(fc, n->matchstmt.val);
+	val = draininc(fc, val, 1);
 
 	match = NULL;
 	nmatch = 0;
@@ -1027,19 +1039,15 @@ static void
 flattenexpr(Flattenctx *fc, Node *n)
 {
 	Node *r;
-	size_t i;
 
 	if (islbl(n)) {
 		append(fc, n);
 		return;
 	}
-
 	r = rval(fc, n);
 	if (r)
 		append(fc, r);
-	for (i = 0; i < fc->nqueue; i++)
-		append(fc, fc->incqueue[i]);
-	lfree(&fc->incqueue, &fc->nqueue);
+	draininc(fc, NULL, 1);
 }
 
 static Node *
