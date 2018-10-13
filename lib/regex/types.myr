@@ -1,0 +1,113 @@
+use std
+
+pkg regex =
+	type status = union
+		`Noimpl
+		`Incomplete
+		`Unbalanced char
+		`Emptyparen
+		`Badrep char
+		`Badrange byte[:]
+		`Badescape char
+	;;
+
+	type regex = struct
+		/* compile state */
+		debug	: bool
+		trace	: bool
+		pat	: byte[:]
+		idx	: std.size
+		nmatch	: std.size
+
+		/* VM state */
+		runq	: rethread#
+		expired	: rethread#
+		expiredtail	: rethread#
+		free	: rethread#
+		nfree	: std.size
+		proglen	: std.size
+		prog	: reinst[:]
+		code	: recode[:]
+		nthr	: std.size
+		str	: byte[:]
+		strp	: std.size
+		nexttid : std.size
+
+		/* debug state */
+		astloc	: std.htab(ast#, std.size)#
+		traces	: std.bitset#[:]
+		pcidx	: std.size[:]
+		lastip	: std.size
+		lastthr	: std.size
+	;;
+
+	type ast = union
+		/* basic string building */
+		`Alt	(ast#, ast#)
+		`Cat	(ast#, ast#)
+
+		/* repetition */
+		`Star	(ast#, bool)
+		`Plus	(ast#, bool)
+		`Quest	ast#	
+
+		/* end matches */
+		`Chr	char
+		`Ranges	char[2][:]
+
+		/* meta */
+		`Cap	(std.size, ast#) /* id, ast */
+		`Bol	/* beginning of line */
+		`Eol	/* end of line */
+		`Bow	/* beginning of word */
+		`Eow	/* end of word */
+	;;
+
+	pkglocal type rethread = struct
+		next	: rethread#	/* run queue link */
+
+		tid	: std.size	/* just for debugging */
+		ip	: std.size	/* the instruction pointer */
+		dead	: bool		/* thread died */
+		matched	: bool		/* thread matched */
+
+		mgroup	: std.size[2][16]	/* match starts */
+	;;
+
+
+	pkglocal type recode = uint64
+
+	/* can have at most up to 0xf ops */
+	const OpByte	: recode = 0x0
+	const OpRange	: recode = 0x1
+	const OpLbra	: recode = 0x2
+	const OpRbra	: recode = 0x3
+	const OpBol	: recode = 0x4
+	const OpEol	: recode = 0x5
+	const OpBow	: recode = 0x6
+	const OpEow	: recode = 0x7
+	const OpFork	: recode = 0x8
+	const OpJmp	: recode = 0x9
+	const OpMatch	: recode = 0xa
+
+	pkglocal type reinst = union
+		/* direct consumers */
+		`Ibyte	byte
+		`Irange	(byte, byte)
+
+		/* groups */
+		`Ilbra	std.size
+		`Irbra	std.size
+
+		/* anchors */
+		`Ibol
+		`Ieol
+		`Ibow
+		`Ieow
+
+		/* control flow */
+		`Ifork	(std.size, std.size)
+		`Ijmp	std.size
+		`Imatch	std.size
+	;;
+;;

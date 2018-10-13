@@ -1,0 +1,10 @@
+sub =
+	mbld
+	lib
+	test
+	bench
+	support
+	doc
+	examples
+;;
+

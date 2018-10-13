@@ -1,0 +1,16 @@
+use std
+
+const main = {
+	var a, b, c, fn
+
+	a = 111
+	b = 555
+	c = 333
+	fn = {
+		var x
+
+		x = 666
+		std.put("{}{}{}{}\n", a, b, c, x)
+	}
+	fn()
+}

@@ -1,0 +1,91 @@
+use std
+
+use "opts"
+use "types"
+
+pkg bld =
+	const run	: (cmd : byte[:][:], dir : byte[:] -> std.pid)
+	const mbldput	: (fmt : byte[:], args : ... -> void)
+	const srcsplit	: (src : byte[:] -> (byte[:], byte[:], byte[:]))
+	const changesuffix	: (f : byte[:], newsuff : byte[:] -> byte[:])
+	const gettarg	: (tab : std.htab(byte[:], targ)#, n : byte[:] -> targ)
+;;
+
+const run = {cmd, dir
+	var pid
+
+	std.assert(cmd.len != 0, "empty command\n")
+	mbldput("\t{j= }\n", cmd);
+	pid = std.fork()
+	if pid == -1
+		std.fatal("could not fork command\n")
+	elif pid == 0
+		if dir.len != 0
+			std.chdir(dir)
+		;;
+		if std.execvp(cmd[0], cmd) < 0
+			std.fatal("failed to exec {}\n", cmd[0])
+		;;
+	;;
+	-> pid
+}
+
+const mbldput = {fmt, args
+	var ap
+
+	if opt_verbosity >= 0
+		ap = std.vastart(&args)
+		std.putv(fmt, &ap)
+	;;
+}
+
+const srcsplit = {src
+	var platf, fbase, suff
+
+	platf = ""
+	suff = ""
+
+	match std.strrfind(src, "/")
+	| `std.Some i:	fbase = i
+	| `std.None:	fbase = 0
+	;;
+	match std.strrfind(src[fbase:], ".")
+	| `std.None: /* no suffix to trim */
+	| `std.Some i:
+		suff = src[fbase+i:]
+		src = src[:fbase+i]
+	;;
+
+	match std.strrfind(src[fbase:], "+")
+	| `std.None: /* no platform to trim */
+	| `std.Some i:
+		platf = src[fbase+i:]
+		src = src[:fbase+i]
+	;;
+	-> (src, platf, suff)
+}
+
+const changesuffix = {src, new
+	var base, platf, suff
+
+	(base, platf, suff) = srcsplit(src)
+	if std.hassuffix(src, ".myr")
+		-> std.strcat(base, new)
+	elif std.hassuffix(src, ".s")
+		-> std.strcat(base, new)
+	elif std.hassuffix(src, ".glue.c")
+		-> std.strjoin([base, new][:], "")
+	elif std.hassuffix(src, ".o") || std.hassuffix(src, ".6")
+		-> std.sldup(src)
+	else
+		std.fatal("unrecognized source {}\n", src)
+	;;
+}
+
+const gettarg = {tab, n
+	match std.htget(tab, n)
+	| `std.None:	std.fatal("unknown target '{}'\n", n)
+	| `std.Some t:	-> t
+	;;
+}
+

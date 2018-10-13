@@ -1,0 +1,79 @@
+use std
+
+use "atomic"
+use "common"
+use "mutex"
+use "sem"
+
+pkg thread =
+	type cond = struct
+		_mtx	: mutex#
+		_head	: condwaiter#
+		_tail	: condwaiter#
+		_lock	: mutex
+	;;
+
+	const mkcond	: (mtx : mutex# -> cond)
+	const condwait	: (cond : cond# -> void)
+	const condsignal	: (cond : cond# -> void)
+	const condbroadcast	: (cond : cond# -> void)
+;;
+
+type condwaiter = struct
+	next : condwaiter#
+	sem : sem
+;;
+
+const mkcond = {mtx
+	-> [._mtx = mtx, ._lock = mkmtx()]
+}
+
+const condwait = {cond
+	var mtx = cond._mtx
+	var lock = &cond._lock
+	var waiter = std.mk([.sem = mksem(0)])
+
+	mtxlock(lock)
+	match cond._tail
+	| Zptr: cond._head = cond._tail = waiter
+	| tail: cond._tail = tail.next = waiter
+	;;
+
+	mtxunlock(lock)
+	mtxunlock(mtx)
+	semwait(&waiter.sem)
+	std.free(waiter)
+	mtxlock(mtx)
+}
+
+const condsignal = {cond
+	var lock = &cond._lock
+
+	mtxlock(lock)
+	var head = cond._head
+	if head != Zptr
+		cond._head = head.next
+		sempost(&head.sem)
+		if cond._head == Zptr
+			cond._tail = Zptr
+		;;
+	;;
+	mtxunlock(lock)
+}
+
+/*
+Yes, this invites the thundering herd but that's what you get for not
+supporting futexes at all.
+*/
+const condbroadcast = {cond
+	var lock = &cond._lock
+	var head = Zptr
+
+	mtxlock(lock)
+	while (head = cond._head) != Zptr
+		cond._head = head.next
+		sempost(&head.sem)
+	;;
+	cond._tail = Zptr
+	mtxunlock(lock)
+}

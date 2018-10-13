@@ -1,0 +1,162 @@
+use std
+use "impls"
+
+pkg math =
+	trait fpmath @f =
+
+		/* atan-impl */
+		atan : (x : @f -> @f)
+		atan2 : (y : @f, x : @f -> @f)
+
+		/* exp-impl */
+		exp : (x : @f -> @f)
+		expm1 : (x : @f -> @f)
+
+		/* fma-impl */
+		fma : (x : @f, y : @f, z : @f -> @f)
+
+		/* log-impl */
+		log : (x : @f -> @f)
+		log1p : (x : @f -> @f)
+
+		/* poly-impl */
+		horner_poly : (x : @f, a : @f[:] -> @f)
+		horner_polyu : (x : @f, a : @u[:] -> @f)
+
+		/* powr-impl */
+		powr : (x : @f, y : @f -> @f)
+
+		/* scale2-impl */
+		scale2 : (x : @f, m : @i -> @f)
+
+		/* sin-impl */
+		sin : (x : @f -> @f)
+		cos : (x : @f -> @f)
+		sincos : (x : @f -> (@f, @f))
+
+		/* sqrt-impl */
+		sqrt : (x : @f -> @f)
+
+		/* sum-impl */
+		kahan_sum : (a : @f[:] -> @f)
+		priest_sum : (a : @f[:] -> @f)
+
+		/* tan-impl */
+		tan : (x : @f -> @f)
+		cot : (x : @f -> @f)
+
+		/* trunc-impl */
+		trunc : (x : @f -> @f)
+		ceil  : (x : @f -> @f)
+		floor : (x : @f -> @f)
+	;;
+
+	trait roundable @f -> @i =
+		/* round-impl */
+		rn : (x : @f -> @i)
+	;;
+
+	impl std.equatable flt32
+	impl std.equatable flt64
+	impl roundable flt64 -> int64
+	impl roundable flt32 -> int32
+	impl fpmath flt32
+	impl fpmath flt64
+;;
+
+/*
+   We consider two floating-point numbers equal if their bits are
+   equal. This does not treat NaNs specially: two distinct NaNs may
+   compare equal, or they may compare distinct (if they arise from
+   different bit patterns).
+
+   Additionally, +0.0 and -0.0 compare differently.
+ */
+impl std.equatable flt32 =
+	eq = {a : flt32, b : flt32; -> std.flt32bits(a) == std.flt32bits(b)}
+;;
+
+impl std.equatable flt64 =
+	eq = {a : flt64, b : flt64; -> std.flt64bits(a) == std.flt64bits(b)}
+;;
+
+impl roundable flt32 -> int32 =
+	rn = {x : flt32; -> rn32(x) }
+;;
+
+impl roundable flt64 -> int64 =
+	rn = {x : flt64; -> rn64(x) }
+;;
+
+impl fpmath flt32 =
+	atan = {x; -> atan32(x)}
+	atan2 = {y, x; -> atan232(y, x)}
+
+	fma = {x, y, z; -> fma32(x, y, z)}
+
+	exp = {x; -> exp32(x)}
+	expm1 = {x; -> expm132(x)}
+
+	log = {x; -> log32(x)}
+	log1p = {x; -> log1p32(x)}
+
+	horner_poly = {x, a; -> horner_poly32(x, a)}
+	horner_polyu = {x, a; -> horner_polyu32(x, a)}
+
+	powr = {x, y; -> powr32(x, y)}
+
+	scale2 = {x, m; -> scale232(x, m)}
+
+	sin = {x; -> sin32(x)}
+	cos = {x; -> cos32(x)}
+	sincos = {x; -> sincos32(x)}
+
+	sqrt = {x; -> sqrt32(x)}
+
+	kahan_sum = {l; -> kahan_sum32(l) }
+	priest_sum = {l; -> priest_sum32(l) }
+
+	tan = {x; -> tan32(x)}
+	cot = {x; -> cot32(x)}
+
+	trunc = {x; -> trunc32(x)}
+	floor = {x; -> floor32(x)}
+	ceil  = {x; -> ceil32(x)}
+
+;;
+
+impl fpmath flt64 =
+	atan = {x; -> atan64(x)}
+	atan2 = {y, x; -> atan264(y, x)}
+
+	fma = {x, y, z; -> fma64(x, y, z)}
+
+	exp = {x; -> exp64(x)}
+	expm1 = {x; -> expm164(x)}
+
+	log = {x; -> log64(x)}
+	log1p = {x; -> log1p64(x)}
+
+	horner_poly = {x, a; -> horner_poly64(x, a)}
+	horner_polyu = {x, a; -> horner_polyu64(x, a)}
+
+	powr = {x, y; -> powr64(x, y)}
+
+	scale2 = {x, m; -> scale264(x, m)}
+
+	sin = {x; -> sin64(x)}
+	cos = {x; -> cos64(x)}
+	sincos = {x; -> sincos64(x)}
+
+	sqrt = {x; -> sqrt64(x)}
+
+	kahan_sum = {l; -> kahan_sum64(l) }
+	priest_sum = {l; -> priest_sum64(l) }
+
+	tan = {x; -> tan64(x)}
+	cot = {x; -> cot64(x)}
+
+	trunc = {x; -> trunc64(x)}
+	floor = {x; -> floor64(x)}
+	ceil  = {x; -> ceil64(x)}
+;;

@@ -1,0 +1,66 @@
+use std
+use inifile
+
+const main = {
+	failopen()
+	getkeys()
+	itersects()
+}
+
+const failopen = {
+	match inifile.load("figment-of-my-imagination.ini")
+	| `std.Ok _:	std.die("found imaginary file\n")
+	| `std.Err _:	/* as expected */
+	;;
+}
+
+const getkeys = {
+	var ini
+
+	ini = std.try(inifile.load("test/test.ini"))
+
+	checkval(ini, "", "toplev", "stuff")
+
+	checkval(ini, "somesect", "key", "foo")
+	checkval(ini, "somesect", "otherkey", "meh")
+	checkval(ini, "somesect", "whatever", "\"stuff here\"")
+
+	checkval(ini, "another section", "key", "foo1")
+	checkval(ini, "another section", "otherkey", "meh1")
+	checkval(ini, "another section", "whatever", "\"more stuff here\"")
+
+	inifile.put(ini, "new sect", "key", "val")
+	/* TODO: check this for validity */
+	std.assert(inifile.write(ini, "test/out.ini"), "failed to write test ini")
+
+	inifile.free(ini)
+}
+
+const itersects = {
+	var ini
+	var somesect, anothersection
+
+	ini = std.try(inifile.load("test/test.ini"))
+	somesect=0
+	anothersection=0
+	for k : inifile.bysection(ini)
+		match k
+		| "somesect":	somesect++
+		| "another section":	anothersection++
+		| bad:	std.fatal("invalid section {}\n", bad)
+		;;
+	;;
+	std.assert(somesect==1, "wrong section count for 'somesect'\n")
+	std.assert(anothersection==1, "wrong section count for 'another section'\n")
+}
+
+const checkval = {ini, sect, key, expected
+	match inifile.get(ini, sect, key)
+	| `std.Some val:
+		if !std.eq(val, expected)
+			std.fatal("{}.{}: expected {}, got {}\n", sect, key, expected, val)
+		;;
+	| `std.None:
+		std.fatal("{}.{}: missing key\n", sect, key)
+	;;
+}

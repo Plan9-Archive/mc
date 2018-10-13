@@ -1,0 +1,62 @@
+lib math =
+	fpmath.myr
+	impls.myr
+
+	# rounding (to actual integers)
+	round-impl+posixy-x64-sse4.s
+	round-impl.myr
+
+	# atan and atan2
+	atan-impl.myr
+
+	# exp and expm1
+	exp-impl.myr
+
+	# fused-multiply-add
+	fma-impl+posixy-x64-fma.s
+	fma-impl.myr
+
+	# log and log1p
+	log-impl.myr
+
+	# polynomial evaluation methods
+	poly-impl.myr
+
+	# x^y
+	powr-impl.myr
+
+	# scalb (multiply x by 2^m)
+	scale2-impl.myr
+
+	# sin, cos
+	sin-impl.myr
+
+	# sqrt
+	sqrt-impl+posixy-x64-sse2.s
+	sqrt-impl.myr
+
+	# summation
+	sum-impl.myr
+
+	# trunc, floor, ceil
+	trunc-impl+posixy-x64-sse4.s
+	trunc-impl.myr
+
+	# tan, cot
+	tan-impl.myr
+
+	# util
+	util.myr
+	ftrap.myr
+	ftrap-impl+plan9-x64.s
+	ftrap-impl+posixy-x64.s
+
+	lib ../std:std
+;;
+
+testdeps =
+	math
+	../testr:testr
+	../sys:sys
+	../std:std
+;;

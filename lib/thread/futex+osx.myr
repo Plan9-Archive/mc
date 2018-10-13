@@ -1,0 +1,85 @@
+use std
+use sys
+
+use "atomic"
+use "common"
+
+pkg thread =
+	type ftxtag = uint64
+	impl atomic ftxtag
+
+	const ftxwait : (uaddr : ftxtag#, val : ftxtag, tmout : std.time -> sys.errno)
+	const ftxwake : (uaddr : ftxtag# -> void)
+	const ftxwakeall : (uaddr : ftxtag# -> void)
+;;
+
+/*
+ * The ulock_ functions are undocumented but the relevant source can be found at
+ * https://github.com/apple/darwin-xnu/blob/0a798f6738bc1db01281fc08ae024145e84df927/bsd/kern/sys_ulock.c
+ */
+const ftxwait = {uaddr, val, tmout
+	var rc
+
+	if tmout < 0
+		while (rc = (sys.ulock_wait(sys.Ulockcompareandwait,
+				(uaddr : uint64#),
+				(val : uint64),
+				0) : sys.errno)) == sys.Eintr
+		;;
+	else
+		var start, t
+		std.assert(tmout <= 0xffffffff, "error: maximum os x futex timeout exceeded\n")
+		std.assert(sys.clock_gettime(`sys.Clockmonotonic, &start) == 0,
+			"error: clock_gettime returned -1\n")
+		t = (tmout : uint32)
+
+		while (rc = (sys.ulock_wait(sys.Ulockcompareandwait,
+				(uaddr : uint64#),
+				(val : uint64),
+				t) : sys.errno)) == sys.Eintr
+			var now
+			std.assert(sys.clock_gettime(`sys.Clockmonotonic, &now) == 0,
+				"error: clock_gettime returned -1\n")
+			var t1 = t - (((now.sec - start.sec) * 1_000_000) : uint32)
+			var nsec = now.nsec - start.nsec
+			if nsec >= 0
+				t1 -= (nsec / 1000 : uint32)
+			else
+				t1 -= ((1_000_000_000 + nsec) / 1000 : uint32)
+			;;
+
+			if t1 > t
+				-> sys.Etimedout
+			;;
+			t = t1
+		;;
+	;;
+
+	match rc
+	| 0: -> 0
+	| sys.Eagain: -> sys.Eagain
+	| sys.Etimedout: -> sys.Etimedout
+	| err:
+		if err > 0
+			-> 0
+		;;
+		std.fput(2, "error: ulock_wait returned {}\n", err)
+		std.suicide()
+	;;
+}
+
+const ftxwake = {uaddr
+	sys.ulock_wake(sys.Ulockcompareandwait, (uaddr : uint64#), 0)
+}
+
+const ftxwakeall = {uaddr
+	sys.ulock_wake(sys.Ulockcompareandwait | sys.Ulockulfwakeall, (uaddr : uint64#), 0)
+}
+
+impl atomic ftxtag =
+	xget = {p; -> (xget64((p : uint64#)) : ftxtag)}
+	xset = {p, v; xset64((p : uint64#), (v : uint64))}
+	xadd = {p, v; -> (xadd64((p : uint64#), (v : uint64)) : ftxtag)}
+	xcas = {p, old, new; -> (xcas64((p : uint64#), (old : uint64), (new : uint64)) : ftxtag)}
+	xchg = {p, v; -> (xchg64((p : uint64#), (v : uint64)) : ftxtag)}
+;;

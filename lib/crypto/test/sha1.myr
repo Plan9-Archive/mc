@@ -1,0 +1,29 @@
+use std
+use crypto
+
+const main = {
+	hasheq(crypto.sha1("")[:], \
+		"da39a3ee5e6b4b0d3255bfef95601890afd80709")
+	hasheq(crypto.sha1("h")[:], \
+		"27d5482eebd075de44389774fce28c69f45c8a75")
+	/* 64 byte block */
+	hasheq(crypto.sha1("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")[:], \
+		"0098ba824b5c16427bd7a1122a5a442a25ec644d")
+	/* tail spanning */
+	hasheq(crypto.sha1("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbb")[:], \
+		"4eb17e52bb55910b03786943698fd9c84376d75a")
+}
+
+const hasheq = {got, expected
+	var sb, str
+
+	sb = std.mksb()
+	for x : got
+		std.sbfmt(sb, "{p=0,w=2,x}", x)
+	;;
+	str = std.sbfin(sb)
+	if (!std.eq(str, expected))
+		std.fatal("mismatched hashes:\n\tgot:\t{}\n\texpected:\t{}\n", str, expected)
+	;;
+	std.slfree(str)
+}

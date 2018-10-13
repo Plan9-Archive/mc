@@ -1,0 +1,76 @@
+use std
+use thread
+
+use thrtestutil
+
+const Nwakes = 1000
+
+var cv
+var cv1
+var mtx
+var val
+
+var ready
+var nwoken : int32
+
+const main = {
+	ready = thread.mkwg(2)
+	val = 123
+
+	mtx = thread.mkmtx()
+	cv = thread.mkcond(&mtx)
+	cv1 = thread.mkcond(&mtx)
+	thread.spawn(cvwait)
+	thread.spawn(cvwake)
+	thread.wgwait(&ready)
+	std.assert(nwoken == Nwakes, "wrong number of wakes")
+
+	ready = thread.mkwg(100)
+	nwoken = 0
+	thrtestutil.mkherd(100, cvwaitonce)
+
+	thread.wgwait(&ready)
+	while nwoken != 100
+		thread.condbroadcast(&cv)
+	;;
+}
+
+const cvwait = {
+	for var i = 0; i < Nwakes; i++
+		thread.mtxlock(&mtx)
+		thread.condsignal(&cv1)
+		thread.condwait(&cv)
+		std.assert(val == 456, "wrong val after signal\n")
+		val = 123
+		thread.mtxunlock(&mtx)
+
+		thread.xadd(&nwoken, 1)
+	;;
+	thread.condsignal(&cv1)
+	thread.wgpost(&ready)
+}
+
+const cvwake = {
+	while true
+		thread.mtxlock(&mtx)
+		val = 456
+		thread.condsignal(&cv)
+		thread.condwait(&cv1)
+		thread.mtxunlock(&mtx)
+
+		if nwoken >= Nwakes
+			break
+		;;
+	;;
+	thread.wgpost(&ready)
+}
+
+const cvwaitonce = {
+	thread.mtxlock(&mtx)
+	thread.wgpost(&ready)
+	thread.condwait(&cv)
+	thread.mtxunlock(&mtx)
+
+	thread.xadd(&nwoken, 1)
+}
+

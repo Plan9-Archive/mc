@@ -1,0 +1,37 @@
+use std
+
+pkg inifile =
+	type error = union
+		`Fileerr
+		`Parseerr int
+		`Dupkey int
+	;;
+
+	type inifile = struct
+		sects	: byte[:][:]
+		elts	: std.htab((byte[:], byte[:]), byte[:])#
+	;;
+
+	impl std.hashable (byte[:], byte[:])
+	impl std.equatable (byte[:], byte[:])
+;;
+
+impl std.hashable (byte[:], byte[:]) =
+	hash = {k
+		var sect, key
+
+		(sect, key) = k
+		-> std.hash(sect) ^ std.hash(key)
+	}
+;;
+
+impl std.equatable (byte[:], byte[:]) =
+	eq = {a, b
+		var s1, k1
+		var s2, k2
+
+		(s1, k1) = a
+		(s2, k2) = a
+		-> std.eq(s1, s2) && std.eq(k1, k2)
+	}
+;;

@@ -1,0 +1,217 @@
+use std
+use regex
+use thread
+
+use "build"
+use "config"
+use "deps"
+use "install"
+use "opts"
+use "parse"
+use "test"
+use "types"
+use "util"
+use "syssel"
+
+const main = {args : byte[:][:]
+	var b : bld.build#
+	var targname
+	var runsrc
+	var path
+	var tmp
+	var cmd 
+	var tags
+	var pid
+	var ok, r
+
+	cmd = std.optparse(args, &[
+		.argdesc = "[inputs...]",
+		.opts = [
+			[.opt='j', .arg="jobs", .desc="build with at most 'jobs' jobs"],
+			[.opt='t', .arg="tag", .desc="build with specified systag"],
+			[.opt='T', .arg="tag", .desc="build with only the specified systag"],
+			[.opt='S', .desc="generate assembly when building"],
+			[.opt='I', .arg="inc", .desc="add 'inc' to your include path"],
+			[.opt='R', .arg="runsrc", .desc="source to compile and run"],
+			[.opt='B', .arg="base", .desc="install into 'base'"],
+			[.opt='b', .arg="bin", .desc="compile binary 'bin' from inputs"],
+			[.opt='r', .arg="rt", .desc="link against runtime 'rt'"],
+			[.opt='o', .arg="dir", .desc="output directory"],
+			[.opt='v', .desc="increase build verbosity"],
+		][:]
+	])
+
+	tags = [][:]
+	runsrc = ""
+	targname = ""
+	ok = true
+
+	bld.initopts()
+	for opt : cmd.opts
+		match opt
+		| ('S', ""):	bld.opt_genasm = true
+		| ('I', arg):	std.slpush(&bld.opt_incpaths, arg)
+		| ('B', arg):	bld.opt_instbase = arg
+		| ('t', tag):	std.slpush(&tags, tag)
+		| ('T', tag):	std.slpush(&bld.opt_alltags, tag)
+		| ('j', arg):	bld.opt_maxproc = std.getv(std.intparse(arg), 1)
+		| ('R', arg):	runsrc = arg
+		| ('o', arg):	bld.opt_objdir = arg
+		| ('b', arg):	targname = arg
+		| ('r', arg):	bld.opt_runtime = arg
+		| ('v', _):	bld.opt_verbosity++
+		| _:		std.die("unreachable\n")
+		;;
+	;;
+	path = std.pathcat(bld.opt_instbase, config.Libpath)
+	std.slpush(&bld.opt_incpaths, path)
+
+	for (e, v) : config.Env
+		std.setenv(e, v)
+	;;
+
+	b = mkbuild(tags)
+	if targname.len != 0
+		ok = buildimm(b, targname, cmd.args)
+	elif runsrc.len != 0
+		bld.opt_verbosity = -1
+		tmp = std.mktemppath("runmyr")
+		ok = buildimm(b, tmp, [runsrc][:])
+		if ok
+			pid = runcmd(tmp, cmd.args)
+			match std.wait(pid)
+			| `std.Wsuccess:	ok = true
+			| _:			ok = false
+			;;
+		;;
+		std.remove(tmp)
+	else
+		findproj(b)
+		bld.load(b)
+		bld.deps(b)
+		bld.testdeps(b)
+		bld.resolve(b)
+		/* default: buildall */
+		if cmd.args.len == 0
+			ok = bld.buildtarg(b, "all")
+		else
+			match cmd.args[0]
+			| "clean":	r = bld.clean(b)
+			| "install":	r = bld.install(b)
+			| "uninstall":	r = bld.uninstall(b)
+			| "test":	r = bld.test(b, cmd.args[1:])
+			| "bench":	r = bld.bench(b, cmd.args[1:])
+			| "list":	r = show(b, cmd.args[1:])
+			| _:
+				ok = true
+				for target : cmd.args
+					r = ok && bld.buildtarg(b, target)
+				;;
+			;;
+		;;
+	;;
+	if !ok
+		std.exit(1)
+	;;
+}
+
+const buildimm = {b, targ, inputs
+	var mt : bld.myrtarg
+
+	mt = [
+		.name=targ,
+		.inputs=inputs,
+		.runtime=bld.opt_runtime,
+		.incpath=bld.opt_incpaths,
+		.libdeps=[][:]
+	]
+	bld.opt_objdir = ""
+	std.slpush(&b.all, "__out__")
+	std.htput(b.targs, "__out__", `bld.Bin &mt)
+	bld.deps(b)
+	bld.resolve(b)
+	-> bld.buildtarg(b, "all")
+}
+
+const runcmd = {bin, args
+	var sl
+
+	sl = std.sldup([bin][:])
+	-> bld.run(std.sljoin(&sl, args), "")
+}
+
+const mkbuild = {tags
+	var b
+
+	b = std.zalloc()
+	b.libs = std.mkht()
+	b.proc = std.mkht()
+	b.targs = std.mkht()
+	b.tags = std.mkht()
+	b.deps = std.mk([
+		.targs = std.mkht(),
+		.gen = std.mkht(),
+		.leaves = [][:],
+		.nodes = [][:],
+	])
+	b.tctime = tctime()
+	bld.addsysattrs(b, tags)
+	-> b
+}
+
+const tctime = {
+	var path : byte[1024]
+	var tm
+
+	tm = 0
+	for bin : [bld.opt_muse, bld.opt_mc][:]
+		match which(path[:], bin)
+		| `std.None:
+		| `std.Some p:
+			match std.fmtime(p)
+			| `std.Ok t:	tm = std.max(tm, t)
+			| `std.Err e:	tm = std.now()
+			;;
+		;;
+	;;
+	-> tm
+}
+
+const which = {buf, name
+	var path, f
+
+	path = std.getenvv("PATH", "/bin")
+	for p : std.bysplit(path, ":")
+		f = std.bfmt(buf, "{}/{}", p, name)
+		if std.fexists(f)
+			-> `std.Some f
+		;;
+	;;
+	-> `std.None
+}
+
+
+const findproj = {b
+	var dir
+
+	dir = std.getcwd()
+	while dir.len > 0 && !std.eq(dir, "/")
+		if std.chdir(dir) && std.fexists("bld.proj")
+			b.basedir = dir
+			break
+		;;
+		dir = std.dirname(dir)
+	;;
+	if dir.len > 0 && std.eq(b.basedir, "/")
+		std.fatal("could not find bld.proj\n")
+	;;
+}
+
+const show = {b, targs
+	var k
+	
+	k = std.htkeys(b.targs)
+	std.put("{j=\n}\n", k)
+	std.slfree(k)
+	-> true
+}

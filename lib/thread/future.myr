@@ -1,0 +1,33 @@
+use std
+
+use "sem"
+
+pkg thread =
+	type future(@a) = struct
+		sem	: sem
+		val	: @a
+	;;
+
+	generic mkfut	: (-> future(@a)#)
+	generic futput	: (fut : future(@a)#, val : @a -> void)
+	generic futget	: (fut : future(@a)# -> @a)
+;;
+
+generic mkfut = {
+	-> std.mk([.sem = mksem(0)])
+}
+
+generic futput = {fut, val
+	fut.val = val
+	sempost(&fut.sem)
+}
+
+generic futget = {fut
+	var val
+	
+	semwait(&fut.sem)
+	val = fut.val
+	std.free(fut)
+	-> val
+}
+

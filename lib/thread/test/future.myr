@@ -1,0 +1,19 @@
+use std
+use sys
+use thread
+
+const main = {
+	var f
+
+	f = thread.mkfut()
+	thread.futput(f, 123)
+	std.assert(thread.futget(f) == 123, "the future is broken\n")
+
+	f = thread.mkfut()
+	thread.spawn({
+		std.usleep(10_000)
+		thread.futput(f, 321)
+	})
+	std.assert(thread.futget(f) == 321, "the future is broken\n")
+}
+
